@@ -200,11 +200,11 @@ For MCP clients, add this to your configuration:
 
 ### Available MCP Tools
 
-- `kanban_list` - List all tasks (with optional filters)
-- `kanban_show` - Get detailed task information
-- `kanban_add` - Create a new task
-- `kanban_move` - Move task between columns
-- `kanban_toggle` - Toggle subtask completion
+- `kanban_task_list` - List all tasks (with optional filters)
+- `kanban_task_show` - Get detailed task information
+- `kanban_task_create` - Create a new task
+- `kanban_task_move` - Move task between columns
+- `kanban_subtask_toggle` - Toggle subtask completion
 
 ## Development
 
