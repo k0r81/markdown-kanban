@@ -1,0 +1,35 @@
+{
+  "name": "markdown-kanban",
+  "version": "1.0.0",
+  "description": "Markdown-based local Kanban board with web GUI and CLI",
+  "main": "index.js",
+  "bin": {
+    "kanban": "./bin/kanban.js",
+    "kanban-cmd": "./bin/kanban-cmd.js"
+  },
+  "scripts": {
+    "start": "node bin/kanban.js serve",
+    "test": "python3 kanban.py list --json"
+  },
+  "keywords": [
+    "kanban",
+    "markdown",
+    "task",
+    "backlog",
+    "cli",
+    "local"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "bugs": {
+    "url": ""
+  },
+  "homepage": "",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

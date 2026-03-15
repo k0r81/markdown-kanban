@@ -1,0 +1,53 @@
+# NPM publish ignore file
+
+# Source files that don't need to be in the package
+.git/
+.github/
+.vscode/
+.idea/
+
+# Examples
+examples/
+
+# Test files
+test/
+*.test.js
+*.spec.js
+
+# Development files
+.editorconfig
+.prettierrc
+.eslintrc
+.eslintrc.js
+
+# CI/CD
+.travis.yml
+.github/workflows/
+.circleci/
+
+# Documentation (except README, LICENSE, API.md)
+docs/
+*.md.bak
+!README.md
+!LICENSE
+!API.md
+!CHANGELOG.md
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache (keep .py files)
+__pycache__/
+*.pyc
+.pycache/
+.pytest_cache/
+
+# Package tarball (don't publish our own package)
+*.tgz
