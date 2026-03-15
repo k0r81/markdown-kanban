@@ -1,15 +1,16 @@
 {
   "name": "markdown-kanban",
   "version": "1.0.0",
-  "description": "Markdown-based local Kanban board with web GUI and CLI",
+  "description": "Markdown-based local Kanban board with web GUI, CLI, and MCP server",
   "main": "index.js",
   "bin": {
     "kanban": "./bin/kanban.js",
-    "kanban-cmd": "./bin/kanban-cmd.js"
+    "kanban-cmd": "./bin/kanban.js"
   },
   "scripts": {
     "start": "node bin/kanban.js serve",
-    "test": "python3 kanban.py list --json"
+    "mcp": "node mcp-server.js",
+    "test": "node bin/kanban.js list --json"
   },
   "keywords": [
     "kanban",
@@ -17,7 +18,9 @@
     "task",
     "backlog",
     "cli",
-    "local"
+    "local",
+    "mcp",
+    "model-context-protocol"
   ],
   "author": "",
   "license": "MIT",
@@ -31,5 +34,8 @@
   "homepage": "",
   "engines": {
     "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
   }
 }

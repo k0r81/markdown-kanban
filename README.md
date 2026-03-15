@@ -1,6 +1,6 @@
 # markdown-kanban
 
-Markdown-based local Kanban board with web GUI and CLI.
+Markdown-based local Kanban board with web GUI, CLI, and MCP server (pure JavaScript).
 
 ## Features
 
@@ -31,7 +31,6 @@ npx markdown-kanban --help
 
 ## Requirements
 
-- Python 3.7+
 - Node.js 16+
 
 ## Quick Start
@@ -169,6 +168,43 @@ backlog/
 ## API for AI Agents
 
 See [API.md](API.md) for detailed API function definitions.
+
+## MCP Server
+
+This package includes a Model Context Protocol (MCP) server for integration with MCP-compatible clients.
+
+### Using the MCP server
+
+```bash
+# Run the MCP server directly
+npm run mcp
+
+# Or using npx
+npx markdown-kanban mcp
+```
+
+### MCP Configuration
+
+For MCP clients, add this to your configuration:
+
+```json
+{
+  "mcpServers": {
+    "markdown-kanban": {
+      "command": "npx",
+      "args": ["markdown-kanban", "mcp"]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+- `kanban_list` - List all tasks (with optional filters)
+- `kanban_show` - Get detailed task information
+- `kanban_add` - Create a new task
+- `kanban_move` - Move task between columns
+- `kanban_toggle` - Toggle subtask completion
 
 ## Development
 
