@@ -23,26 +23,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "kanban_list",
-        description: "Get list of all tasks from kanban. Optionally filter by column or epic group.",
+        name: "kanban_task_list",
+        description: "Get list of all tasks from kanban board. Optionally filter by column or epic group.",
         inputSchema: {
           type: "object",
           properties: {
             col: {
               type: "string",
               enum: COLS,
-              description: "Optionally filter by column"
+              description: "Optionally filter by column (active|planned|icebox|done)"
             },
             epic: {
               type: "string",
-              description: "Optionally filter by epic group"
+              description: "Optionally filter by epic group name"
             }
           }
         }
       },
       {
-        name: "kanban_show",
-        description: "Get detailed information about a specific task, including subtask list.",
+        name: "kanban_task_show",
+        description: "Get detailed information about a specific task, including subtask list and details.",
         inputSchema: {
           type: "object",
           properties: {
@@ -55,8 +55,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "kanban_add",
-        description: "Create new task in kanban in specified column and optional epic group.",
+        name: "kanban_task_create",
+        description: "Create new task in kanban board in specified column and optional epic group.",
         inputSchema: {
           type: "object",
           properties: {
@@ -68,20 +68,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               enum: COLS,
               default: "planned",
-              description: "Column to place task in"
+              description: "Column to place task in (active|planned|icebox|done)"
             },
             epic: {
               type: "string",
               default: "—",
-              description: "Epic group (optional)"
+              description: "Epic group name (optional)"
             }
           },
           required: ["title"]
         }
       },
       {
-        name: "kanban_move",
-        description: "Move existing task to different column.",
+        name: "kanban_task_move",
+        description: "Move existing task to different column on the kanban board.",
         inputSchema: {
           type: "object",
           properties: {
@@ -92,15 +92,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             column: {
               type: "string",
               enum: COLS,
-              description: "New column"
+              description: "New column (active|planned|icebox|done)"
             }
           },
           required: ["task_id", "column"]
         }
       },
       {
-        name: "kanban_toggle",
-        description: "Toggle checkbox state for subtask (done/not done).",
+        name: "kanban_subtask_toggle",
+        description: "Toggle checkbox state for subtask completion (done/not done).",
         inputSchema: {
           type: "object",
           properties: {
@@ -127,7 +127,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result;
     
     switch (name) {
-      case "kanban_list": {
+      case "kanban_task_list": {
         const epics = await kanban.allEpics();
         
         let filtered = epics;
@@ -142,7 +142,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
       
-      case "kanban_show": {
+      case "kanban_task_show": {
         const filePath = await kanban.findFile(args.task_id);
         if (!filePath) {
           throw new Error(`Task not found: ${args.task_id}`);
@@ -153,7 +153,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
       
-      case "kanban_add": {
+      case "kanban_task_create": {
         result = await kanban.doCreate(
           args.title,
           args.col || "planned",
@@ -165,7 +165,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
       
-      case "kanban_move": {
+      case "kanban_task_move": {
         const success = await kanban.doMove(args.task_id, args.column);
         if (!success) {
           throw new Error(`Failed to move task: ${args.task_id}`);
@@ -174,7 +174,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
       
-      case "kanban_toggle": {
+      case "kanban_subtask_toggle": {
         const success = await kanban.doToggle(args.task_id, args.idx);
         if (!success) {
           throw new Error(`Failed to toggle subtask: ${args.task_id}[${args.idx}]`);
