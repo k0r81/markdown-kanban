@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const BACKLOG = path.join(__dirname, '..', 'backlog');
+const BACKLOG = path.join(process.cwd(), 'backlog');
 const COLS = kanban.COLS;
 const STATUS_MAP = kanban.STATUS_MAP;
 
@@ -16,6 +16,53 @@ function shortId(epicId) {
 
 function displayTitle(epic) {
   return epic.title.replace(/^[\w.-]+:\s*/, '');
+}
+
+function mcpCommand(useNpx) {
+  if (useNpx) {
+    return { command: 'npx', args: ['-y', 'markdown-kanban', 'mcp'] };
+  }
+  return { command: 'node', args: ['./node_modules/markdown-kanban/mcp-server.js'] };
+}
+
+function claudeMcpConfig(useNpx) {
+  const cmd = mcpCommand(useNpx);
+  return {
+    mcpServers: {
+      'markdown-kanban': cmd
+    }
+  };
+}
+
+function openCodeMcpConfig(useNpx) {
+  const cmd = useNpx
+    ? ['npx', '-y', 'markdown-kanban', 'mcp']
+    : ['node', './node_modules/markdown-kanban/mcp-server.js'];
+  
+  return {
+    '$schema': 'https://opencode.ai/config.json',
+    mcp: {
+      'markdown-kanban': {
+        type: 'local',
+        command: cmd,
+        enabled: true
+      }
+    }
+  };
+}
+
+async function writeJsonConfig(filePath, data, force) {
+  if (fs.existsSync(filePath) && !force) {
+    return { status: 'skipped' };
+  }
+  
+  await fs.promises.writeFile(
+    filePath,
+    JSON.stringify(data, null, 2) + '\n',
+    'utf-8'
+  );
+  
+  return { status: 'written' };
 }
 
 async function cliInit() {
@@ -35,6 +82,43 @@ async function cliInit() {
   }
   
   console.log(`✓ Backlog w: ${BACKLOG}`);
+}
+
+async function cliMcpInit(options) {
+  const useNpx = options.useNpx;
+  const force = options.force;
+  const onlyClaude = options.onlyClaude;
+  const onlyOpenCode = options.onlyOpenCode;
+  const cwd = process.cwd();
+  
+  const targets = [];
+  if (!onlyOpenCode) {
+    targets.push({
+      label: '.mcp.json (Claude Code)',
+      filePath: path.join(cwd, '.mcp.json'),
+      data: claudeMcpConfig(useNpx)
+    });
+  }
+  if (!onlyClaude) {
+    targets.push({
+      label: 'opencode.json (OpenCode)',
+      filePath: path.join(cwd, 'opencode.json'),
+      data: openCodeMcpConfig(useNpx)
+    });
+  }
+  
+  for (const target of targets) {
+    const result = await writeJsonConfig(target.filePath, target.data, force);
+    if (result.status === 'skipped') {
+      console.log(`• Pominięto ${target.label} (już istnieje)`);
+    } else {
+      console.log(`✓ Utworzono ${target.label}`);
+    }
+  }
+  
+  if (!force) {
+    console.log('  (użyj --force, aby nadpisać istniejące pliki)');
+  }
 }
 
 async function cliList(colFilter, epicFilter, asJson) {

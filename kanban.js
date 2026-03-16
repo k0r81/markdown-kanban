@@ -2,7 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 
-const BACKLOG = path.join(__dirname, 'backlog');
+const BACKLOG = path.join(process.cwd(), 'backlog');
 const COLS = ["active", "planned", "icebox", "done"];
 const STATUS_MAP = {
   active: "in_progress",
