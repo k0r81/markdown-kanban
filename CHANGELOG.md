@@ -11,15 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Major rewrite**: Migrated from Python to pure JavaScript
 - Removed Python dependency - now requires only Node.js 16+
 - All functionality now works natively in JavaScript
+- **Consolidated MCP tools**: Reduced from 5 to 3 universal tools (read, create, update)
+- Easier to implement across different MCP clients
 
 ### Added
 - **MCP server integration**: Full Model Context Protocol support
-- 5 MCP tools: `kanban_task_list`, `kanban_task_show`, `kanban_task_create`, `kanban_task_move`, `kanban_subtask_toggle`
-- Enhanced tool naming for better clarity and first-time user experience
+- 3 unified MCP tools with operation-based approach:
+  - `kanban_read` - list tasks, filter, or get details (replaces list+show)
+  - `kanban_create` - create new tasks
+  - `kanban_update` - move, toggle, or edit tasks (replaces move+toggle)
+- Enhanced tool descriptions with more context
 - GitHub repository links in package.json
 
 ### Improved
-- Better tool descriptions with more context
+- **Better UX**: 3 tools instead of 5, easier to understand at first glance
+- Operation-based design allows for future extensibility
 - Clearer purpose for each MCP tool
 - Updated documentation with MCP configuration examples
 

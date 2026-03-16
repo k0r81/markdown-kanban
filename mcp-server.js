@@ -23,40 +23,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "kanban_task_list",
-        description: "Get list of all tasks from kanban board. Optionally filter by column or epic group.",
+        name: "kanban_read",
+        description: "Read tasks from kanban board. Can list all tasks, filter by column/epic, or get details of a specific task.",
         inputSchema: {
           type: "object",
           properties: {
+            operation: {
+              type: "string",
+              enum: ["list", "show"],
+              description: "Operation to perform: 'list' for all tasks (with optional filters), 'show' for specific task details",
+              default: "list"
+            },
+            task_id: {
+              type: "string",
+              description: "Task ID (required for 'show' operation, e.g. 'PI-014-google-calendar')"
+            },
             col: {
               type: "string",
               enum: COLS,
-              description: "Optionally filter by column (active|planned|icebox|done)"
+              description: "Optionally filter by column (active|planned|icebox|done) for 'list' operation"
             },
             epic: {
               type: "string",
-              description: "Optionally filter by epic group name"
+              description: "Optionally filter by epic group name for 'list' operation"
             }
           }
         }
       },
       {
-        name: "kanban_task_show",
-        description: "Get detailed information about a specific task, including subtask list and details.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            task_id: {
-              type: "string",
-              description: "Task ID (e.g. 'PI-014-google-calendar')"
-            }
-          },
-          required: ["task_id"]
-        }
-      },
-      {
-        name: "kanban_task_create",
-        description: "Create new task in kanban board in specified column and optional epic group.",
+        name: "kanban_create",
+        description: "Create a new task on the kanban board.",
         inputSchema: {
           type: "object",
           properties: {
@@ -80,40 +76,46 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "kanban_task_move",
-        description: "Move existing task to different column on the kanban board.",
+        name: "kanban_update",
+        description: "Update existing tasks on kanban board. Can move tasks between columns, toggle subtask completion, or update task details.",
         inputSchema: {
           type: "object",
           properties: {
+            operation: {
+              type: "string",
+              enum: ["move", "toggle", "update"],
+              description: "Operation to perform: 'move' to change column, 'toggle' to complete subtask, 'update' to change title/tasks"
+            },
             task_id: {
               type: "string",
-              description: "Task ID to move"
+              description: "Task ID to update"
             },
             column: {
               type: "string",
               enum: COLS,
-              description: "New column (active|planned|icebox|done)"
-            }
-          },
-          required: ["task_id", "column"]
-        }
-      },
-      {
-        name: "kanban_subtask_toggle",
-        description: "Toggle checkbox state for subtask completion (done/not done).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            task_id: {
-              type: "string",
-              description: "Parent task ID"
+              description: "New column (required for 'move' operation)"
             },
             idx: {
               type: "integer",
-              description: "Subtask index (starting from 0)"
+              description: "Subtask index (required for 'toggle' operation, starting from 0)"
+            },
+            title: {
+              type: "string",
+              description: "New task title (optional for 'update' operation)"
+            },
+            tasks: {
+              type: "array",
+              description: "New subtask list (optional for 'update' operation)",
+              items: {
+                type: "object",
+                properties: {
+                  done: { type: "boolean" },
+                  text: { type: "string" }
+                }
+              }
             }
           },
-          required: ["task_id", "idx"]
+          required: ["operation", "task_id"]
         }
       }
     ]
@@ -127,33 +129,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result;
     
     switch (name) {
-      case "kanban_task_list": {
-        const epics = await kanban.allEpics();
+      case "kanban_read": {
+        const operation = args.operation || "list";
         
-        let filtered = epics;
-        if (args.col) {
-          filtered = filtered.filter(e => e.column === args.col);
+        if (operation === "list") {
+          const epics = await kanban.allEpics();
+          
+          let filtered = epics;
+          if (args.col) {
+            filtered = filtered.filter(e => e.column === args.col);
+          }
+          if (args.epic) {
+            filtered = filtered.filter(e => e.epic_group === args.epic);
+          }
+          
+          result = filtered;
+        } else if (operation === "show") {
+          if (!args.task_id) {
+            throw new Error("task_id is required for 'show' operation");
+          }
+          
+          const filePath = await kanban.findFile(args.task_id);
+          if (!filePath) {
+            throw new Error(`Task not found: ${args.task_id}`);
+          }
+          
+          const col = COLS.find(c => filePath.includes(c)) || "planned";
+          result = await kanban.parseEpic(filePath, col);
+        } else {
+          throw new Error(`Unknown operation: ${operation}`);
         }
-        if (args.epic) {
-          filtered = filtered.filter(e => e.epic_group === args.epic);
-        }
-        
-        result = filtered;
         break;
       }
       
-      case "kanban_task_show": {
-        const filePath = await kanban.findFile(args.task_id);
-        if (!filePath) {
-          throw new Error(`Task not found: ${args.task_id}`);
-        }
-        
-        const col = COLS.find(c => filePath.includes(c)) || "planned";
-        result = await kanban.parseEpic(filePath, col);
-        break;
-      }
-      
-      case "kanban_task_create": {
+      case "kanban_create": {
         result = await kanban.doCreate(
           args.title,
           args.col || "planned",
@@ -165,27 +174,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
       
-      case "kanban_task_move": {
-        const success = await kanban.doMove(args.task_id, args.column);
-        if (!success) {
-          throw new Error(`Failed to move task: ${args.task_id}`);
-        }
-        result = { success: true, message: `Moved ${args.task_id} to ${args.column}` };
-        break;
-      }
-      
-      case "kanban_subtask_toggle": {
-        const success = await kanban.doToggle(args.task_id, args.idx);
-        if (!success) {
-          throw new Error(`Failed to toggle subtask: ${args.task_id}[${args.idx}]`);
-        }
+      case "kanban_update": {
+        const operation = args.operation;
         
-        const filePath = await kanban.findFile(args.task_id);
-        if (filePath) {
-          const col = COLS.find(c => filePath.includes(c)) || "planned";
-          result = await kanban.parseEpic(filePath, col);
+        if (operation === "move") {
+          const success = await kanban.doMove(args.task_id, args.column);
+          if (!success) {
+            throw new Error(`Failed to move task: ${args.task_id}`);
+          }
+          result = { success: true, message: `Moved ${args.task_id} to ${args.column}` };
+        } else if (operation === "toggle") {
+          const success = await kanban.doToggle(args.task_id, args.idx);
+          if (!success) {
+            throw new Error(`Failed to toggle subtask: ${args.task_id}[${args.idx}]`);
+          }
+          
+          const filePath = await kanban.findFile(args.task_id);
+          if (filePath) {
+            const col = COLS.find(c => filePath.includes(c)) || "planned";
+            result = await kanban.parseEpic(filePath, col);
+          } else {
+            result = { success: true };
+          }
+        } else if (operation === "update") {
+          const success = await kanban.doUpdate(
+            args.task_id,
+            args.title !== undefined ? args.title : null,
+            args.tasks !== undefined ? args.tasks : null
+          );
+          if (!success) {
+            throw new Error(`Failed to update task: ${args.task_id}`);
+          }
+          
+          const filePath = await kanban.findFile(args.task_id);
+          if (filePath) {
+            const col = COLS.find(c => filePath.includes(c)) || "planned";
+            result = await kanban.parseEpic(filePath, col);
+          } else {
+            result = { success: true };
+          }
         } else {
-          result = { success: true };
+          throw new Error(`Unknown operation: ${operation}`);
         }
         break;
       }
