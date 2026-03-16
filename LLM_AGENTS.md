@@ -32,6 +32,28 @@ Add to your MCP client configuration:
 }
 ```
 
+### Project Automation (Claude Code + OpenCode)
+
+Generate project configs automatically in the current folder:
+
+```bash
+# Local install (recommended)
+npx markdown-kanban mcp-init
+
+# Use npx-based command in configs
+npx markdown-kanban mcp-init --npx
+
+# Only Claude Code config
+npx markdown-kanban mcp-init --claude
+
+# Only OpenCode config
+npx markdown-kanban mcp-init --opencode
+```
+
+This creates:
+- `.mcp.json` for Claude Code (project-scoped MCP servers)
+- `opencode.json` for OpenCode (project-scoped MCP servers)
+
 ## Available Tools
 
 ### 1. kanban_read

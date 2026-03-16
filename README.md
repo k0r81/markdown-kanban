@@ -64,6 +64,7 @@ kanban toggle PI-001 0
 |---------|-------------|
 | `kanban serve [PORT]` | Start web GUI (default: 5500) |
 | `kanban init` | Initialize backlog structure |
+| `kanban mcp-init` | Generate MCP config files for Claude Code / OpenCode |
 | `kanban list` | List all tasks |
 | `kanban show <ID>` | Show task details |
 | `kanban add <TITLE>` | Add new task |
@@ -196,6 +197,61 @@ For MCP clients, add this to your configuration:
     }
   }
 }
+```
+
+### MCP Per Project (Recommended)
+
+Install locally in the project so each repo controls its own MCP version:
+
+```bash
+npm install -D markdown-kanban
+```
+
+Then point MCP to the local package:
+
+```json
+{
+  "mcpServers": {
+    "markdown-kanban": {
+      "command": "node",
+      "args": ["./node_modules/markdown-kanban/mcp-server.js"]
+    }
+  }
+}
+```
+
+If you prefer `npx`, you can still use it, but versioning is less explicit:
+
+```json
+{
+  "mcpServers": {
+    "markdown-kanban": {
+      "command": "npx",
+      "args": ["markdown-kanban", "mcp"]
+    }
+  }
+}
+```
+
+### MCP Project Automation (Claude Code + OpenCode)
+
+Generate project configs automatically (creates `.mcp.json` and `opencode.json` in the current folder):
+
+```bash
+# Local install (recommended)
+npx markdown-kanban mcp-init
+
+# Use npx-based command in configs
+npx markdown-kanban mcp-init --npx
+
+# Only Claude Code config
+npx markdown-kanban mcp-init --claude
+
+# Only OpenCode config
+npx markdown-kanban mcp-init --opencode
+
+# Overwrite existing files
+npx markdown-kanban mcp-init --force
 ```
 
 ### Available MCP Tools

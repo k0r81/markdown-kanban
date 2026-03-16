@@ -349,6 +349,30 @@ async function main() {
     await serveWeb(port);
   } else if (cmd === 'init') {
     await cliInit();
+  } else if (cmd === 'mcp-init') {
+    let useNpx = false;
+    let onlyClaude = false;
+    let onlyOpenCode = false;
+    let force = false;
+    
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--npx') {
+        useNpx = true;
+      } else if (args[i] === '--claude') {
+        onlyClaude = true;
+      } else if (args[i] === '--opencode') {
+        onlyOpenCode = true;
+      } else if (args[i] === '--force') {
+        force = true;
+      }
+    }
+    
+    if (onlyClaude && onlyOpenCode) {
+      onlyClaude = false;
+      onlyOpenCode = false;
+    }
+    
+    await cliMcpInit({ useNpx, onlyClaude, onlyOpenCode, force });
   } else if (cmd === 'list') {
     let colFilter = null;
     let epicFilter = null;
