@@ -1,10 +1,13 @@
 # NPM publish ignore file
 
-# Source files that don't need to be in the package
+# Source files that don't need to be in package
 .git/
 .github/
 .vscode/
 .idea/
+
+# Local data (user's tasks)
+backlog/
 
 # Examples
 examples/
