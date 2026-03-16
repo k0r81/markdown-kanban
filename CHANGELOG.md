@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `kanban mcp-init` command to generate project MCP configs for Claude Code and OpenCode
 - Documentation for MCP per-project automation in README and LLM_AGENTS.md
+- MCP GUI control tools: `kanban_gui_start`, `kanban_gui_stop`, `kanban_gui_status`
+- README + LLM_AGENTS updates for GUI tools and npm package details
 
 ## [1.2.0] - 2026-03-16
 

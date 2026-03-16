@@ -29,6 +29,12 @@ npm install -D markdown-kanban
 npx markdown-kanban --help
 ```
 
+## NPM Package
+
+- Package name: `markdown-kanban`
+- Binaries: `kanban`, `kanban-cmd`
+- MCP server entrypoint: `mcp-server.js` (run via `npx markdown-kanban mcp`)
+
 ## Requirements
 
 - Node.js 16+
@@ -259,6 +265,9 @@ npx markdown-kanban mcp-init --force
 - `kanban_read` - Read tasks (list all, filter, or get specific task details)
 - `kanban_create` - Create a new task
 - `kanban_update` - Update tasks (move, toggle subtask, or edit details)
+- `kanban_gui_start` - Start the web GUI server (returns URL)
+- `kanban_gui_stop` - Stop the web GUI server
+- `kanban_gui_status` - Check GUI server status
 
 ## Development
 

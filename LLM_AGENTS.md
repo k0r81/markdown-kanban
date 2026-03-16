@@ -269,6 +269,90 @@ Update subtasks:
 
 ---
 
+### 4. kanban_gui_start
+
+Start the web GUI server for the kanban board.
+
+**Parameters:**
+```json
+{
+  "port": 5500  // Optional: port for GUI (default 5500)
+}
+```
+
+**Examples:**
+
+Start GUI on default port:
+```json
+{}
+```
+
+Start GUI on custom port:
+```json
+{
+  "port": 8080
+}
+```
+
+**Response:**
+```json
+{
+  "status": "started",
+  "port": 5500,
+  "pid": 12345,
+  "url": "http://localhost:5500"
+}
+```
+
+---
+
+### 5. kanban_gui_stop
+
+Stop the web GUI server if it is running.
+
+**Parameters:**
+```json
+{}
+```
+
+**Response:**
+```json
+{
+  "status": "stopping",
+  "port": 5500
+}
+```
+
+---
+
+### 6. kanban_gui_status
+
+Get status of the web GUI server.
+
+**Parameters:**
+```json
+{}
+```
+
+**Response (running):**
+```json
+{
+  "status": "running",
+  "port": 5500,
+  "pid": 12345,
+  "url": "http://localhost:5500"
+}
+```
+
+**Response (not running):**
+```json
+{
+  "status": "not_running"
+}
+```
+
+---
+
 ## Data Structure
 
 ### Task Object

@@ -3,9 +3,75 @@
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
+const { spawn } = require("child_process");
+const path = require("path");
 const kanban = require("./kanban.js");
 
 const COLS = kanban.COLS;
+let guiProcess = null;
+let guiPort = null;
+
+function normalizePort(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
+    return null;
+  }
+  return parsed;
+}
+
+async function startGuiServer(port) {
+  const desiredPort = normalizePort(port ?? 5500);
+  if (!desiredPort) {
+    throw new Error("Invalid port");
+  }
+
+  if (guiProcess && guiProcess.exitCode === null) {
+    return {
+      status: "already_running",
+      port: guiPort,
+      url: `http://localhost:${guiPort}`
+    };
+  }
+
+  await kanban.ensureBacklogDir();
+
+  const scriptPath = path.join(__dirname, "bin", "kanban.js");
+  guiProcess = spawn(process.execPath, [scriptPath, "serve", String(desiredPort)], {
+    stdio: "ignore",
+    windowsHide: true
+  });
+  guiPort = desiredPort;
+
+  guiProcess.on("exit", () => {
+    guiProcess = null;
+    guiPort = null;
+  });
+
+  return {
+    status: "started",
+    port: desiredPort,
+    pid: guiProcess.pid,
+    url: `http://localhost:${desiredPort}`
+  };
+}
+
+function stopGuiServer() {
+  if (!guiProcess || guiProcess.exitCode !== null) {
+    guiProcess = null;
+    guiPort = null;
+    return { status: "not_running" };
+  }
+
+  guiProcess.kill();
+  return { status: "stopping", port: guiPort };
+}
+
+function guiStatus() {
+  if (!guiProcess || guiProcess.exitCode !== null) {
+    return { status: "not_running" };
+  }
+  return { status: "running", port: guiPort, pid: guiProcess.pid, url: `http://localhost:${guiPort}` };
+}
 
 const server = new Server(
   {
@@ -117,6 +183,35 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["operation", "task_id"]
         }
+      },
+      {
+        name: "kanban_gui_start",
+        description: "Start the web GUI server for the kanban board.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            port: {
+              type: "integer",
+              description: "Port for the GUI server (default 5500)"
+            }
+          }
+        }
+      },
+      {
+        name: "kanban_gui_stop",
+        description: "Stop the web GUI server if it is running.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "kanban_gui_status",
+        description: "Get status of the web GUI server.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
       }
     ]
   };
@@ -216,6 +311,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } else {
           throw new Error(`Unknown operation: ${operation}`);
         }
+        break;
+      }
+
+      case "kanban_gui_start": {
+        result = await startGuiServer(args?.port);
+        break;
+      }
+
+      case "kanban_gui_stop": {
+        result = stopGuiServer();
+        break;
+      }
+
+      case "kanban_gui_status": {
+        result = guiStatus();
         break;
       }
       
