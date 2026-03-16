@@ -4,8 +4,8 @@
   "description": "Markdown-based local Kanban board with web GUI, CLI, and MCP server",
   "main": "index.js",
   "bin": {
-    "kanban": "./bin/kanban.js",
-    "kanban-cmd": "./bin/kanban.js"
+    "kanban": "bin/kanban.js",
+    "kanban-cmd": "bin/kanban.js"
   },
   "scripts": {
     "start": "node bin/kanban.js serve",
