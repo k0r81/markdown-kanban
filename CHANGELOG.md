@@ -13,10 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Usage patterns for common workflows (discovery, creation, progression, epic management)
 - Best practices guide for LLM agents
 - Error handling documentation
+- **AGENTS.md**: Complete guide for AI coding agents with build/lint/test commands
 
 ### Improved
 - Enhanced README reference to LLM agent documentation
 - Better integration instructions for different MCP clients
+
+### Note
+- **npm publish requires 2FA**: Publishing to npm requires two-factor authentication enabled
+- Use `npm publish --auth-token YOUR_TOKEN` with an automation token for CI/CD
+- Or use OTP (one-time password) with `npm login --auth-type=legacy`
 
 ## [1.1.0] - 2026-03-16
 
