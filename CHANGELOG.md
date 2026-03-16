@@ -5,6 +5,19 @@ All notable changes to markdown-kanban will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-16
+
+### Added
+- **LLM Agents documentation**: New `LLM_AGENTS.md` with complete guide for AI assistants
+- Comprehensive tool examples with request/response patterns
+- Usage patterns for common workflows (discovery, creation, progression, epic management)
+- Best practices guide for LLM agents
+- Error handling documentation
+
+### Improved
+- Enhanced README reference to LLM agent documentation
+- Better integration instructions for different MCP clients
+
 ## [1.1.0] - 2026-03-16
 
 ### Changed
