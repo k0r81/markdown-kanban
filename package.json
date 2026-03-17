@@ -1,6 +1,6 @@
 {
   "name": "markdown-kanban",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Markdown-based local Kanban board with web GUI, CLI, and MCP server",
   "main": "index.js",
   "bin": {
@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node bin/kanban.js serve",
     "mcp": "node mcp-server.js",
-    "test": "node bin/kanban.js list --json"
+    "test": "node tests/run.js"
   },
   "keywords": [
     "kanban",

@@ -150,35 +150,17 @@ async function doUpdate(epicId, newTitle, newTasks) {
   }
   
   if (newTasks !== null) {
-    const taskiIndex = text.indexOf('## Taski');
+    const taskText = newTasks
+      .filter(t => t.text && t.text.trim())
+      .map(t => `- [${t.done ? 'x' : ' '}] ${t.text}`)
+      .join('\n');
     
-    if (taskiIndex !== -1) {
-      const before = text.substring(0, taskiIndex);
-      const rest = text.substring(taskiIndex);
-      const lines = rest.split('\n');
-      let skip = 0;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.trim() === '' || /^- \[[ x]\]/.test(line)) {
-          skip = i + 1;
-        } else {
-          break;
-        }
-      }
-      const remaining = lines.slice(skip).join('\n');
-      
-      const taskText = newTasks
-        .filter(t => t.text && t.text.trim())
-        .map(t => `- [${t.done ? 'x' : ' '}] ${t.text}`)
-        .join('\n');
-      
-      text = before + '## Taski\n\n' + taskText + '\n\n' + remaining;
+    if (/## Taski\s*\n/.test(text)) {
+      text = text.replace(
+        /## Taski\s*\n([\s\S]*?)(?=\n## |\s*$)/,
+        () => `## Taski\n\n${taskText}\n`
+      );
     } else {
-      const taskText = newTasks
-        .filter(t => t.text && t.text.trim())
-        .map(t => `- [${t.done ? 'x' : ' '}] ${t.text}`)
-        .join('\n');
-      
       text += `\n\n## Taski\n\n${taskText}\n`;
     }
   }
