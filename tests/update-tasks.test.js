@@ -4,12 +4,13 @@ const os = require('os');
 const path = require('path');
 
 async function run() {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'markdown-kanban-'));
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kanbango-'));
   const backlogDir = path.join(tempRoot, 'backlog', 'active');
   await fs.mkdir(backlogDir, { recursive: true });
 
   const epicId = 'PI-001-test';
-  const filePath = path.join(backlogDir, `${epicId}.md`);
+  const markdownPath = path.join(backlogDir, `${epicId}.md`);
+  const jsonPath = path.join(backlogDir, `${epicId}.json`);
   const initial = `# PI-001: Test
 
 **Status:** in_progress
@@ -17,40 +18,43 @@ async function run() {
 **Created:** 2026-03-17
 
 ## Opis
-—
+Legacy markdown task
 
 ## Taski
 - [ ] Stare 1
 - [x] Stare 2
 
 ## Notes
-—
+Legacy note
 `;
-  await fs.writeFile(filePath, initial, 'utf-8');
+  await fs.writeFile(markdownPath, initial, 'utf-8');
 
   process.chdir(tempRoot);
   const kanban = require(path.join(__dirname, '..', 'kanban.js'));
 
   const newTasks = [
-    { text: 'Nowe 1', done: false },
-    { text: 'Nowe 2', done: true },
+    { text: 'Nowe 1', done: false, description: 'Pierwszy subtask' },
+    { text: 'Nowe 2', done: true, description: 'Drugi subtask' }
   ];
 
   const ok = await kanban.doUpdate(epicId, null, newTasks);
   assert.strictEqual(ok, true, 'doUpdate should return true');
 
-  const updated = await fs.readFile(filePath, 'utf-8');
-  const taskiMatches = updated.match(/## Taski/g) || [];
-  assert.strictEqual(taskiMatches.length, 1, 'Taski section should not duplicate');
+  await assert.rejects(fs.stat(markdownPath), /ENOENT/, 'markdown file should be replaced during migration');
 
-  const blockMatch = updated.match(/## Taski\s*\n([\s\S]*?)\n## Notes/);
-  assert.ok(blockMatch, 'Taski section should be followed by Notes');
-  const taskBlock = blockMatch[1].trim();
-  assert.strictEqual(
-    taskBlock,
-    '- [ ] Nowe 1\n- [x] Nowe 2',
-    'Taski section should be replaced, not appended'
+  const updated = JSON.parse(await fs.readFile(jsonPath, 'utf-8'));
+  assert.deepStrictEqual(
+    updated.subtasks,
+    [
+      { id: 'st-1', text: 'Nowe 1', done: false, description: 'Pierwszy subtask' },
+      { id: 'st-2', text: 'Nowe 2', done: true, description: 'Drugi subtask' }
+    ],
+    'subtasks should be written to migrated JSON task file'
   );
+
+  const parsed = await kanban.getTask(epicId);
+  assert.strictEqual(parsed.description, 'Legacy markdown task', 'markdown description should survive migration');
+  assert.strictEqual(parsed.notes, 'Legacy note', 'markdown notes should survive migration');
 }
 
 run().catch((err) => {

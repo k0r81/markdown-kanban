@@ -291,6 +291,16 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
 }
 .task-row label { font-size: 12px; cursor: pointer; line-height: 1.4; color: var(--text); }
 .task-row.done label { text-decoration: line-through; color: var(--muted); }
+.task-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.task-desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
 
 /* ── Edit mode ── */
 .card.editing { box-shadow: 0 0 0 2px var(--planned); cursor: default; }
@@ -313,6 +323,92 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
 }
 .edit-task-input:focus { border-color: var(--planned); background: #fff; }
 .edit-task-input:hover { border-color: var(--border); }
+.edit-task-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.edit-task-desc,
+.edit-block,
+.lane-add-textarea {
+  width: 100%;
+  border: 1px solid #d7deea;
+  border-radius: 4px;
+  padding: 5px 7px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+  min-height: 56px;
+  background: #fff;
+}
+.edit-task-desc {
+  min-height: 48px;
+}
+.edit-block:focus,
+.edit-task-desc:focus,
+.lane-add-textarea:focus {
+  border-color: var(--planned);
+}
+.detail-section {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid #edf0f5;
+}
+.detail-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.detail-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.edit-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+.lane-addinp {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lane-add-title {
+  width: 100%;
+  border: 1px solid var(--planned);
+  border-radius: 4px;
+  padding: 4px 7px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.lane-add-actions {
+  display: flex;
+  gap: 6px;
+}
 .del-task {
   flex-shrink: 0; border: none; background: none; cursor: pointer;
   color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px;
@@ -397,7 +493,7 @@ let colCounts  = {};
 let collapsed  = new Set();
 let expanded   = new Set();
 let editingId  = null;
-let dirtyEdits = {}; // epicId → {title, tasks}
+let dirtyEdits = {}; // epicId -> editable task draft
 
 // ── Load & render ─────────────────────────────────────────────────────────────
 
@@ -602,13 +698,18 @@ function renderCard(epic, colId) {
       lbl.textContent = "Subtaski";
       card.appendChild(lbl);
 
+      appendDetailSections(card, epic);
+
       const list = el("div", "tasks-list");
       epic.tasks.forEach((task, idx) => {
         const row = el("div", `task-row${task.done ? " done" : ""}`);
         const cbId = `v-${epic.id}-${idx}`;
         row.innerHTML = `
           <input type="checkbox" id="${cbId}" ${task.done ? "checked" : ""}>
-          <label for="${cbId}">${escHtml(task.text)}</label>
+          <div class="task-copy">
+            <label for="${cbId}">${escHtml(task.text)}</label>
+            ${task.description ? `<div class="task-desc">${escHtml(task.description)}</div>` : ""}
+          </div>
         `;
         row.querySelector("input").onchange = async function() {
           this.disabled = true;
@@ -631,7 +732,15 @@ function renderCard(epic, colId) {
 
 function renderEditMode(card, epic, colId, shortId) {
   const displayTitle = epic.title.replace(/^[\w.-]+:\s*/, "");
-  const dirty = dirtyEdits[epic.id] || { title: displayTitle, tasks: epic.tasks.map(t => ({...t})) };
+  const dirty = dirtyEdits[epic.id] || {
+    title: displayTitle,
+    description: epic.description || "",
+    specs: epic.specs || "",
+    acceptance_criteria: (epic.acceptance_criteria || []).join("\n"),
+    notes: epic.notes || "",
+    tasks: epic.tasks.map(t => ({ ...t }))
+  };
+  dirtyEdits[epic.id] = dirty;
 
   const top = el("div", "card-top");
   const idBadge = el("span", "card-id");
@@ -645,6 +754,25 @@ function renderEditMode(card, epic, colId, shortId) {
   titleInput.value = dirty.title;
   titleInput.oninput = () => { dirty.title = titleInput.value; dirtyEdits[epic.id] = dirty; };
   card.appendChild(titleInput);
+
+  const meta = el("div", "edit-meta");
+  meta.appendChild(renderEditBlock("Opis", dirty.description, value => {
+    dirty.description = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "Kontekst i plan implementacji..."));
+  meta.appendChild(renderEditBlock("Specs", dirty.specs, value => {
+    dirty.specs = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "API, ograniczenia, edge case'y..."));
+  meta.appendChild(renderEditBlock("Acceptance Criteria", dirty.acceptance_criteria, value => {
+    dirty.acceptance_criteria = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "Jeden warunek na linie"));
+  meta.appendChild(renderEditBlock("Notes", dirty.notes, value => {
+    dirty.notes = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "Opcjonalne notatki"));
+  card.appendChild(meta);
 
   // Subtasks section
   const editTasks = el("div", "edit-tasks");
@@ -663,6 +791,7 @@ function renderEditMode(card, epic, colId, shortId) {
       cb.checked = task.done;
       cb.onchange = () => { dirty.tasks[idx].done = cb.checked; dirtyEdits[epic.id] = dirty; };
 
+      const fields = el("div", "edit-task-fields");
       const inp = document.createElement("input");
       inp.className = "edit-task-input";
       inp.value = task.text;
@@ -677,13 +806,21 @@ function renderEditMode(card, epic, colId, shortId) {
         }
       };
 
+      const desc = document.createElement("textarea");
+      desc.className = "edit-task-desc";
+      desc.placeholder = "Opis subtaska...";
+      desc.value = task.description || "";
+      desc.oninput = () => { dirty.tasks[idx].description = desc.value; dirtyEdits[epic.id] = dirty; };
+
       const delBtn = document.createElement("button");
       delBtn.className = "del-task";
       delBtn.textContent = "×";
       delBtn.title = "Usuń subtask";
       delBtn.onclick = () => { dirty.tasks.splice(idx, 1); dirtyEdits[epic.id] = dirty; refreshRows(); };
 
-      row.appendChild(cb); row.appendChild(inp); row.appendChild(delBtn);
+      fields.appendChild(inp);
+      fields.appendChild(desc);
+      row.appendChild(cb); row.appendChild(fields); row.appendChild(delBtn);
       taskRows.appendChild(row);
     });
   };
@@ -696,7 +833,7 @@ function renderEditMode(card, epic, colId, shortId) {
   addSubtaskInput.placeholder = "+ Nowy subtask… (Enter)";
   addSubtaskInput.onkeydown = e => {
     if (e.key === "Enter" && addSubtaskInput.value.trim()) {
-      dirty.tasks.push({ done: false, text: addSubtaskInput.value.trim() });
+      dirty.tasks.push({ done: false, text: addSubtaskInput.value.trim(), description: "" });
       dirtyEdits[epic.id] = dirty;
       addSubtaskInput.value = "";
       refreshRows();
@@ -742,7 +879,16 @@ async function saveEdit(epicId) {
   if (epic) {
     const origTitle = epic.title.replace(/^[\w.-]+:\s*/, "");
     if (dirty.title !== origTitle) body.title = dirty.title;
-    body.tasks = dirty.tasks.filter(t => t.text.trim());
+    body.description = dirty.description;
+    body.specs = dirty.specs;
+    body.acceptance_criteria = splitLines(dirty.acceptance_criteria);
+    body.notes = dirty.notes;
+    body.tasks = dirty.tasks.filter(t => t.text.trim()).map((task, idx) => ({
+      id: task.id || `st-${idx + 1}`,
+      text: task.text.trim(),
+      done: Boolean(task.done),
+      description: (task.description || "").trim()
+    }));
   }
   try {
     const res = await fetch(`/api/epics/${enc(epicId)}`, {
@@ -771,20 +917,37 @@ function showLaneAdd(lane, colId, groupName, addBtn) {
   if (existing) { existing.remove(); return; }
 
   const wrap = el("div", "lane-addinp");
-  wrap.style.cssText = "background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:7px;margin-top:2px;";
   const inp = document.createElement("input");
-  inp.style.cssText = "width:100%;border:1px solid var(--planned);border-radius:4px;padding:4px 7px;font-size:12px;font-family:inherit;outline:none;";
+  inp.className = "lane-add-title";
   inp.placeholder = "Nazwa nowego taska…";
   inp.autocomplete = "off";
+
+  const description = document.createElement("textarea");
+  description.className = "lane-add-textarea";
+  description.placeholder = "Opis taska (opcjonalnie)...";
+
+  const actions = el("div", "lane-add-actions");
+  const confirmBtn = document.createElement("button");
+  confirmBtn.className = "btn-sm btn-confirm";
+  confirmBtn.textContent = "Dodaj";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-sm btn-cancel";
+  cancelBtn.textContent = "Anuluj";
 
   const doAdd = async () => {
     const title = inp.value.trim();
     if (!title) return;
     inp.disabled = true;
+    description.disabled = true;
     const res = await fetch("/api/epics", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, column: colId, epic_group: groupName === "—" ? "" : groupName }),
+      body: JSON.stringify({
+        title,
+        column: colId,
+        epic_group: groupName === "—" ? "" : groupName,
+        description: description.value.trim()
+      }),
     });
     if (res.ok) {
       toast("Dodano ✓");
@@ -792,12 +955,21 @@ function showLaneAdd(lane, colId, groupName, addBtn) {
       await load();
     } else {
       toast("Błąd!", true);
-      inp.disabled = false; inp.focus();
+      inp.disabled = false;
+      description.disabled = false;
+      inp.focus();
     }
   };
 
   inp.onkeydown = e => { if (e.key === "Enter") doAdd(); if (e.key === "Escape") wrap.remove(); };
+  description.onkeydown = e => { if (e.key === "Escape") wrap.remove(); };
+  confirmBtn.onclick = doAdd;
+  cancelBtn.onclick = () => wrap.remove();
   wrap.appendChild(inp);
+  wrap.appendChild(description);
+  actions.appendChild(confirmBtn);
+  actions.appendChild(cancelBtn);
+  wrap.appendChild(actions);
   lane.insertBefore(wrap, addBtn);
   inp.focus();
 }
@@ -846,6 +1018,60 @@ function el(tag, cls) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   return e;
+}
+function splitLines(value) {
+  return String(value || "").split("\n").map(line => line.trim()).filter(Boolean);
+}
+function appendDetailSections(card, epic) {
+  if (epic.description) {
+    card.appendChild(renderDetailSection("Opis", epic.description));
+  }
+  if (epic.specs) {
+    card.appendChild(renderDetailSection("Specs", epic.specs));
+  }
+  if (epic.acceptance_criteria && epic.acceptance_criteria.length > 0) {
+    card.appendChild(renderDetailListSection("Acceptance Criteria", epic.acceptance_criteria));
+  }
+  if (epic.notes) {
+    card.appendChild(renderDetailSection("Notes", epic.notes));
+  }
+}
+function renderDetailSection(label, text) {
+  const wrap = el("div", "detail-section");
+  const labelEl = el("div", "detail-label");
+  labelEl.textContent = label;
+  const textEl = el("div", "detail-text");
+  textEl.textContent = text;
+  wrap.appendChild(labelEl);
+  wrap.appendChild(textEl);
+  return wrap;
+}
+function renderDetailListSection(label, items) {
+  const wrap = el("div", "detail-section");
+  const labelEl = el("div", "detail-label");
+  labelEl.textContent = label;
+  const list = el("ul", "detail-list");
+  items.forEach(item => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    list.appendChild(li);
+  });
+  wrap.appendChild(labelEl);
+  wrap.appendChild(list);
+  return wrap;
+}
+function renderEditBlock(label, value, onInput, placeholder) {
+  const wrap = el("div");
+  const labelEl = el("div", "detail-label");
+  labelEl.textContent = label;
+  const textarea = document.createElement("textarea");
+  textarea.className = "edit-block";
+  textarea.value = value;
+  textarea.placeholder = placeholder;
+  textarea.oninput = () => onInput(textarea.value);
+  wrap.appendChild(labelEl);
+  wrap.appendChild(textarea);
+  return wrap;
 }
 function escHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");

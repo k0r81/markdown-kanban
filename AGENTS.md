@@ -1,6 +1,6 @@
 # AGENTS.md - Guide for AI Coding Agents
 
-This document provides build commands, testing procedures, and code style guidelines for working with the markdown-kanban codebase.
+This document provides build commands, testing procedures, and code style guidelines for working with the kanbango codebase.
 
 ## Build & Development Commands
 
@@ -59,7 +59,7 @@ npm install -g .
 
 ### File Structure
 ```
-markdown-kanban/
+kanbango/
 ├── bin/              # CLI executables
 │   ├── kanban.js      # Main CLI with web server
 │   └── kanban-cmd.js  # Alternative CLI (symlink to kanban.js)
@@ -117,7 +117,7 @@ console.log(JSON.stringify(data, null, 2));  // Double quotes in JSON
 **Trailing commas:** Omit in objects/arrays unless needed for formatting
 ```javascript
 const config = {
-  name: "markdown-kanban",
+  name: "kanbango",
   version: "1.0.0"
 };
 ```
@@ -310,7 +310,7 @@ console.error('✗ Task not found');
 process.exit(1);
 
 // MCP server
-console.error("markdown-kanban MCP server running");
+console.error("kanbango MCP server running");
 ```
 
 ### Comments
@@ -320,12 +320,12 @@ console.error("markdown-kanban MCP server running");
 **Use JSDoc for module exports when helpful:**
 ```javascript
 /**
- * markdown-kanban - Markdown-based Kanban board
- * 
- * This package provides a local Kanban board with web GUI, CLI, and MCP server.
- * Tasks are stored as Markdown files in a `backlog/` directory.
- * 
- * @module markdown-kanban
+* kanbango - JSON-first Kanban board
+
+  * This package provides a local Kanban board with web GUI, CLI, and MCP server.
+  * Tasks are stored as JSON files in a `backlog/` directory.
+  * 
+  * @module kanbango
  */
 ```
 
@@ -600,7 +600,7 @@ return { content: [{ text: JSON.stringify({ error: error.message }) }], isError:
 
 ## Getting Help
 
-- README.md: https://github.com/k0r81/markdown-kanban#readme
+- README.md: https://github.com/k0r81/kanbango#readme
 - LLM Agents Guide: LLM_AGENTS.md
 - MCP Server Guide: LLM_AGENTS.md
-- Issues: https://github.com/k0r81/markdown-kanban/issues
+- Issues: https://github.com/k0r81/kanbango/issues

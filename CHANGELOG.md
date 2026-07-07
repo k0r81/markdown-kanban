@@ -1,9 +1,21 @@
 # Changelog
 
-All notable changes to markdown-kanban will be documented in this file.
+All notable changes to kanbango will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.0.0] - 2026-07-07
+
+### Added
+- `kanban migrate` CLI command to convert `.md` task files to `.json`
+- `migrateAll()` exported function in the core module
+
+### Changed
+- **Breaking rename:** package renamed from `markdown-kanban` to `kanbango`
+- All npm/npx references updated to `kanbango`
+- MCP server name updated to `kanbango`
+- Repository URLs updated to `k0r81/kanbango`
 
 ## [1.4.1] - 2026-03-17
 
@@ -13,6 +25,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `doUpdate` now replaces the `## Taski` section instead of appending duplicates
+
+## [1.5.0] - 2026-07-07
+
+### Added
+- JSON-first task storage with rich task fields: `description`, `specs`, `acceptance_criteria`, `notes`
+- Rich subtask descriptions in storage, MCP responses, and the web GUI
+- MCP read shaping via `view` presets and explicit `fields`
+- Structured MCP error responses with `code`, `message`, `hint`, `details`, and `retryable`
+- Regression tests for read shaping, Markdown migration, and MCP responses
+
+### Changed
+- New tasks are now written as `.json` files in `backlog/<column>/`
+- `kanban_update` supports patch-style updates and compact `return` payloads
+- Web GUI editor now supports rich task planning fields and subtask descriptions
+
+### Fixed
+- Existing Markdown task files remain readable during transition and are migrated to JSON on write
 
 ## [1.3.1] - 2026-03-16
 

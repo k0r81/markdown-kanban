@@ -1,6 +1,6 @@
 # MCP Server Guide for LLM Agents
 
-Complete guide for integrating markdown-kanban MCP server into LLM agents and AI assistants.
+Complete guide for integrating kanbango MCP server into LLM agents and AI assistants.
 
 ## Quick Integration
 
@@ -12,9 +12,9 @@ Add to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "markdown-kanban": {
+    "kanbango": {
       "command": "npx",
-      "args": ["markdown-kanban", "mcp"]
+      "args": ["kanbango", "mcp"]
     }
   }
 }
@@ -24,7 +24,7 @@ Add to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "markdown-kanban": {
+    "kanbango": {
       "command": "node",
       "args": ["path/to/mcp-server.js"]
     }
@@ -38,16 +38,16 @@ Generate project configs automatically in the current folder:
 
 ```bash
 # Local install (recommended)
-npx markdown-kanban mcp-init
+npx kanbango mcp-init
 
 # Use npx-based command in configs
-npx markdown-kanban mcp-init --npx
+npx kanbango mcp-init --npx
 
 # Only Claude Code config
-npx markdown-kanban mcp-init --claude
+npx kanbango mcp-init --claude
 
 # Only OpenCode config
-npx markdown-kanban mcp-init --opencode
+npx kanbango mcp-init --opencode
 ```
 
 This creates:
@@ -470,7 +470,7 @@ Common errors:
 Tell users to run:
 
 ```bash
-npm install -g markdown-kanban
+npm install -g kanbango
 ```
 
 Then add to their MCP configuration using the examples above.
@@ -479,6 +479,6 @@ Then add to their MCP configuration using the examples above.
 
 ## Support
 
-- GitHub: https://github.com/k0r81/markdown-kanban
-- Issues: https://github.com/k0r81/markdown-kanban/issues
-- Full docs: https://github.com/k0r81/markdown-kanban#readme
+- GitHub: https://github.com/k0r81/kanbango
+- Issues: https://github.com/k0r81/kanbango/issues
+- Full docs: https://github.com/k0r81/kanbango#readme

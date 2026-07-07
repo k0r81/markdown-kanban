@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
-const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
-const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
-const { spawn } = require("child_process");
-const path = require("path");
-const kanban = require("./kanban.js");
+const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
+const { spawn } = require('child_process');
+const path = require('path');
+const kanban = require('./kanban.js');
 
 const COLS = kanban.COLS;
+const READ_VIEWS = Object.keys(kanban.VIEW_FIELDS);
 let guiProcess = null;
 let guiPort = null;
 
@@ -19,15 +20,73 @@ function normalizePort(value) {
   return parsed;
 }
 
+function serializeError(error) {
+  return {
+    error: {
+      code: error.code || 'INTERNAL_ERROR',
+      message: error.message,
+      hint: error.hint || 'Inspect the request payload and try again',
+      details: error.details || {},
+      retryable: Boolean(error.retryable)
+    }
+  };
+}
+
+function invalidRequest(message, hint, details) {
+  return kanban.createKanbanError('VALIDATION_ERROR', message, hint, details, false, 400);
+}
+
+function normalizeReturnShape(returnShape) {
+  if (returnShape === undefined) return 'summary';
+  if (!['none', 'summary', 'full'].includes(returnShape)) {
+    throw invalidRequest(
+      `Unsupported return value: ${returnShape}`,
+      'Use one of: none, summary, full',
+      { return: returnShape }
+    );
+  }
+  return returnShape;
+}
+
+function normalizeReadOptions(args, defaultView) {
+  if (args.fields !== undefined) {
+    if (!Array.isArray(args.fields) || args.fields.length === 0) {
+      throw invalidRequest(
+        'fields must be a non-empty array when provided',
+        'Pass fields like ["title", "description"] or omit the field',
+        { fields: args.fields }
+      );
+    }
+
+    return { fields: args.fields };
+  }
+
+  const view = args.view || defaultView;
+  if (!READ_VIEWS.includes(view)) {
+    throw invalidRequest(
+      `Unsupported view: ${view}`,
+      `Use one of: ${READ_VIEWS.join(', ')}`,
+      { view }
+    );
+  }
+
+  return { view };
+}
+
+function formatTaskResult(task, returnShape) {
+  if (returnShape === 'none') return { ok: true };
+  return kanban.shapeTask(task, { view: returnShape === 'full' ? 'full' : 'summary' });
+}
+
 async function startGuiServer(port) {
   const desiredPort = normalizePort(port ?? 5500);
   if (!desiredPort) {
-    throw new Error("Invalid port");
+    throw invalidRequest('Invalid port', 'Use an integer between 1 and 65535', { port });
   }
 
   if (guiProcess && guiProcess.exitCode === null) {
     return {
-      status: "already_running",
+      status: 'already_running',
       port: guiPort,
       url: `http://localhost:${guiPort}`
     };
@@ -35,20 +94,20 @@ async function startGuiServer(port) {
 
   await kanban.ensureBacklogDir();
 
-  const scriptPath = path.join(__dirname, "bin", "kanban.js");
-  guiProcess = spawn(process.execPath, [scriptPath, "serve", String(desiredPort)], {
-    stdio: "ignore",
+  const scriptPath = path.join(__dirname, 'bin', 'kanban.js');
+  guiProcess = spawn(process.execPath, [scriptPath, 'serve', String(desiredPort)], {
+    stdio: 'ignore',
     windowsHide: true
   });
   guiPort = desiredPort;
 
-  guiProcess.on("exit", () => {
+  guiProcess.on('exit', () => {
     guiProcess = null;
     guiPort = null;
   });
 
   return {
-    status: "started",
+    status: 'started',
     port: desiredPort,
     pid: guiProcess.pid,
     url: `http://localhost:${desiredPort}`
@@ -59,29 +118,29 @@ function stopGuiServer() {
   if (!guiProcess || guiProcess.exitCode !== null) {
     guiProcess = null;
     guiPort = null;
-    return { status: "not_running" };
+    return { status: 'not_running' };
   }
 
   guiProcess.kill();
-  return { status: "stopping", port: guiPort };
+  return { status: 'stopping', port: guiPort };
 }
 
 function guiStatus() {
   if (!guiProcess || guiProcess.exitCode !== null) {
-    return { status: "not_running" };
+    return { status: 'not_running' };
   }
-  return { status: "running", port: guiPort, pid: guiProcess.pid, url: `http://localhost:${guiPort}` };
+  return { status: 'running', port: guiPort, pid: guiProcess.pid, url: `http://localhost:${guiPort}` };
 }
 
 const server = new Server(
   {
-    name: "markdown-kanban",
-    version: "1.0.0",
+    name: 'kanbango',
+    version: '2.0.0'
   },
   {
     capabilities: {
-      tools: {},
-    },
+      tools: {}
+    }
   }
 );
 
@@ -89,127 +148,178 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "kanban_read",
-        description: "Read tasks from kanban board. Can list all tasks, filter by column/epic, or get details of a specific task.",
+        name: 'kanban_read',
+        description: 'Read tasks from kanban board with compact views or explicit fields.',
         inputSchema: {
-          type: "object",
+          type: 'object',
           properties: {
             operation: {
-              type: "string",
-              enum: ["list", "show"],
-              description: "Operation to perform: 'list' for all tasks (with optional filters), 'show' for specific task details",
-              default: "list"
+              type: 'string',
+              enum: ['list', 'show'],
+              description: "Operation to perform: 'list' for all tasks, 'show' for a specific task",
+              default: 'list'
             },
             task_id: {
-              type: "string",
+              type: 'string',
               description: "Task ID (required for 'show' operation, e.g. 'PI-014-google-calendar')"
             },
             col: {
-              type: "string",
+              type: 'string',
               enum: COLS,
-              description: "Optionally filter by column (active|planned|icebox|done) for 'list' operation"
+              description: 'Optional column filter for list'
             },
             epic: {
-              type: "string",
-              description: "Optionally filter by epic group name for 'list' operation"
+              type: 'string',
+              description: 'Optional epic group filter for list'
+            },
+            view: {
+              type: 'string',
+              enum: READ_VIEWS,
+              description: 'Preset response view. Defaults to summary.'
+            },
+            fields: {
+              type: 'array',
+              description: 'Explicit fields to return. When provided, fields override view.',
+              items: { type: 'string' }
             }
           }
         }
       },
       {
-        name: "kanban_create",
-        description: "Create a new task on the kanban board.",
+        name: 'kanban_create',
+        description: 'Create a new task on the kanban board with optional rich planning fields.',
         inputSchema: {
-          type: "object",
+          type: 'object',
           properties: {
             title: {
-              type: "string",
-              description: "Title of new task"
+              type: 'string',
+              description: 'Title of new task'
             },
             col: {
-              type: "string",
+              type: 'string',
               enum: COLS,
-              default: "planned",
-              description: "Column to place task in (active|planned|icebox|done)"
+              default: 'planned',
+              description: 'Column to place task in (active|planned|icebox|done)'
             },
             epic: {
-              type: "string",
-              default: "—",
-              description: "Epic group name (optional)"
-            }
-          },
-          required: ["title"]
-        }
-      },
-      {
-        name: "kanban_update",
-        description: "Update existing tasks on kanban board. Can move tasks between columns, toggle subtask completion, or update task details.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            operation: {
-              type: "string",
-              enum: ["move", "toggle", "update"],
-              description: "Operation to perform: 'move' to change column, 'toggle' to complete subtask, 'update' to change title/tasks"
+              type: 'string',
+              default: '—',
+              description: 'Epic group name (optional)'
             },
-            task_id: {
-              type: "string",
-              description: "Task ID to update"
+            description: {
+              type: 'string',
+              description: 'High-level context and implementation plan'
             },
-            column: {
-              type: "string",
-              enum: COLS,
-              description: "New column (required for 'move' operation)"
+            specs: {
+              type: 'string',
+              description: 'Technical constraints, APIs, and edge cases'
             },
-            idx: {
-              type: "integer",
-              description: "Subtask index (required for 'toggle' operation, starting from 0)"
+            acceptance_criteria: {
+              type: 'array',
+              description: 'What must be true for the task to be complete',
+              items: { type: 'string' }
             },
-            title: {
-              type: "string",
-              description: "New task title (optional for 'update' operation)"
-            },
-            tasks: {
-              type: "array",
-              description: "New subtask list (optional for 'update' operation)",
+            subtasks: {
+              type: 'array',
+              description: 'Optional subtask list',
               items: {
-                type: "object",
+                type: 'object',
                 properties: {
-                  done: { type: "boolean" },
-                  text: { type: "string" }
+                  id: { type: 'string' },
+                  text: { type: 'string' },
+                  done: { type: 'boolean' },
+                  description: { type: 'string' }
                 }
               }
+            },
+            notes: {
+              type: 'string',
+              description: 'Optional freeform notes'
             }
           },
-          required: ["operation", "task_id"]
+          required: ['title']
         }
       },
       {
-        name: "kanban_gui_start",
-        description: "Start the web GUI server for the kanban board.",
+        name: 'kanban_update',
+        description: 'Move tasks, toggle subtasks, or apply patch-style updates with configurable response size.',
         inputSchema: {
-          type: "object",
+          type: 'object',
+          properties: {
+            operation: {
+              type: 'string',
+              enum: ['move', 'toggle', 'update'],
+              description: "'move' changes column, 'toggle' flips one subtask, 'update' applies a patch"
+            },
+            task_id: {
+              type: 'string',
+              description: 'Task ID to update'
+            },
+            column: {
+              type: 'string',
+              enum: COLS,
+              description: "New column for 'move'"
+            },
+            idx: {
+              type: 'integer',
+              description: "Subtask index for 'toggle'"
+            },
+            patch: {
+              type: 'object',
+              description: "Patch payload for 'update'"
+            },
+            title: {
+              type: 'string',
+              description: 'Backward-compatible title update shortcut'
+            },
+            tasks: {
+              type: 'array',
+              description: 'Backward-compatible subtask update shortcut',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  done: { type: 'boolean' },
+                  text: { type: 'string' },
+                  description: { type: 'string' }
+                }
+              }
+            },
+            return: {
+              type: 'string',
+              enum: ['none', 'summary', 'full'],
+              description: 'Returned payload size after update. Defaults to summary.'
+            }
+          },
+          required: ['operation', 'task_id']
+        }
+      },
+      {
+        name: 'kanban_gui_start',
+        description: 'Start the web GUI server for the kanban board.',
+        inputSchema: {
+          type: 'object',
           properties: {
             port: {
-              type: "integer",
-              description: "Port for the GUI server (default 5500)"
+              type: 'integer',
+              description: 'Port for the GUI server (default 5500)'
             }
           }
         }
       },
       {
-        name: "kanban_gui_stop",
-        description: "Stop the web GUI server if it is running.",
+        name: 'kanban_gui_stop',
+        description: 'Stop the web GUI server if it is running.',
         inputSchema: {
-          type: "object",
+          type: 'object',
           properties: {}
         }
       },
       {
-        name: "kanban_gui_status",
-        description: "Get status of the web GUI server.",
+        name: 'kanban_gui_status',
+        description: 'Get status of the web GUI server.',
         inputSchema: {
-          type: "object",
+          type: 'object',
           properties: {}
         }
       }
@@ -218,126 +328,138 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  
+  const { name, arguments: args = {} } = request.params;
+
   try {
     let result;
-    
+
     switch (name) {
-      case "kanban_read": {
-        const operation = args.operation || "list";
-        
-        if (operation === "list") {
-          const epics = await kanban.allEpics();
-          
-          let filtered = epics;
+      case 'kanban_read': {
+        const operation = args.operation || 'list';
+        const readOptions = normalizeReadOptions(args, 'summary');
+
+        if (operation === 'list') {
+          let tasks = await kanban.allEpics();
           if (args.col) {
-            filtered = filtered.filter(e => e.column === args.col);
+            tasks = tasks.filter((task) => task.column === args.col);
           }
           if (args.epic) {
-            filtered = filtered.filter(e => e.epic_group === args.epic);
+            tasks = tasks.filter((task) => task.epic_group === args.epic);
           }
-          
-          result = filtered;
-        } else if (operation === "show") {
+
+          result = tasks.map((task) => kanban.shapeTask(task, readOptions));
+        } else if (operation === 'show') {
           if (!args.task_id) {
-            throw new Error("task_id is required for 'show' operation");
+            throw invalidRequest(
+              "task_id is required for 'show' operation",
+              'Provide the task id you want to inspect',
+              { operation }
+            );
           }
-          
-          const filePath = await kanban.findFile(args.task_id);
-          if (!filePath) {
-            throw new Error(`Task not found: ${args.task_id}`);
-          }
-          
-          const col = COLS.find(c => filePath.includes(c)) || "planned";
-          result = await kanban.parseEpic(filePath, col);
+
+          result = kanban.shapeTask(await kanban.getTask(args.task_id), readOptions);
         } else {
-          throw new Error(`Unknown operation: ${operation}`);
-        }
-        break;
-      }
-      
-      case "kanban_create": {
-        result = await kanban.doCreate(
-          args.title,
-          args.col || "planned",
-          args.epic || "—"
-        );
-        if (!result) {
-          throw new Error("Failed to create task");
-        }
-        break;
-      }
-      
-      case "kanban_update": {
-        const operation = args.operation;
-        
-        if (operation === "move") {
-          const success = await kanban.doMove(args.task_id, args.column);
-          if (!success) {
-            throw new Error(`Failed to move task: ${args.task_id}`);
-          }
-          result = { success: true, message: `Moved ${args.task_id} to ${args.column}` };
-        } else if (operation === "toggle") {
-          const success = await kanban.doToggle(args.task_id, args.idx);
-          if (!success) {
-            throw new Error(`Failed to toggle subtask: ${args.task_id}[${args.idx}]`);
-          }
-          
-          const filePath = await kanban.findFile(args.task_id);
-          if (filePath) {
-            const col = COLS.find(c => filePath.includes(c)) || "planned";
-            result = await kanban.parseEpic(filePath, col);
-          } else {
-            result = { success: true };
-          }
-        } else if (operation === "update") {
-          const success = await kanban.doUpdate(
-            args.task_id,
-            args.title !== undefined ? args.title : null,
-            args.tasks !== undefined ? args.tasks : null
+          throw invalidRequest(
+            `Unknown operation: ${operation}`,
+            'Use one of: list, show',
+            { operation }
           );
-          if (!success) {
-            throw new Error(`Failed to update task: ${args.task_id}`);
-          }
-          
-          const filePath = await kanban.findFile(args.task_id);
-          if (filePath) {
-            const col = COLS.find(c => filePath.includes(c)) || "planned";
-            result = await kanban.parseEpic(filePath, col);
-          } else {
-            result = { success: true };
-          }
-        } else {
-          throw new Error(`Unknown operation: ${operation}`);
         }
         break;
       }
 
-      case "kanban_gui_start": {
-        result = await startGuiServer(args?.port);
+      case 'kanban_create': {
+        const created = await kanban.doCreate(args.title, args.col || 'planned', args.epic || '—', {
+          description: args.description,
+          specs: args.specs,
+          acceptance_criteria: args.acceptance_criteria,
+          subtasks: args.subtasks,
+          notes: args.notes
+        });
+        result = kanban.shapeTask(created, { view: 'full' });
         break;
       }
 
-      case "kanban_gui_stop": {
+      case 'kanban_update': {
+        const operation = args.operation;
+        const returnShape = normalizeReturnShape(args.return);
+
+        if (operation === 'move') {
+          if (!args.column) {
+            throw invalidRequest(
+              "column is required for 'move'",
+              'Provide one target column',
+              { operation }
+            );
+          }
+          const updated = await kanban.updateTask(args.task_id, { column: args.column });
+          result = formatTaskResult(updated, returnShape);
+        } else if (operation === 'toggle') {
+          if (!Number.isInteger(args.idx)) {
+            throw invalidRequest(
+              "idx is required for 'toggle'",
+              'Provide a zero-based subtask index',
+              { operation, idx: args.idx }
+            );
+          }
+          const current = await kanban.getTask(args.task_id);
+          if (args.idx < 0 || args.idx >= current.subtasks.length) {
+            throw kanban.createKanbanError(
+              'INVALID_SUBTASK_INDEX',
+              `Subtask index ${args.idx} is not valid for task ${args.task_id}`,
+              'Read the task first and use an index between 0 and subtasks.length - 1',
+              { task_id: args.task_id, idx: args.idx, total_subtasks: current.subtasks.length },
+              false,
+              400
+            );
+          }
+
+          const subtasks = current.subtasks.map((subtask, idx) => ({
+            ...subtask,
+            done: idx === args.idx ? !subtask.done : subtask.done
+          }));
+          const updated = await kanban.updateTask(args.task_id, { subtasks });
+          result = formatTaskResult(updated, returnShape);
+        } else if (operation === 'update') {
+          const patch = args.patch ? { ...args.patch } : {};
+          if (args.title !== undefined) patch.title = args.title;
+          if (args.tasks !== undefined) patch.subtasks = args.tasks;
+          const updated = await kanban.updateTask(args.task_id, patch);
+          result = formatTaskResult(updated, returnShape);
+        } else {
+          throw invalidRequest(
+            `Unknown operation: ${operation}`,
+            'Use one of: move, toggle, update',
+            { operation }
+          );
+        }
+        break;
+      }
+
+      case 'kanban_gui_start': {
+        result = await startGuiServer(args.port);
+        break;
+      }
+
+      case 'kanban_gui_stop': {
         result = stopGuiServer();
         break;
       }
 
-      case "kanban_gui_status": {
+      case 'kanban_gui_status': {
         result = guiStatus();
         break;
       }
-      
+
       default:
-        throw new Error(`Unknown tool: ${name}`);
+        throw invalidRequest(`Unknown tool: ${name}`, 'Call tools/list to discover available tools', { name });
     }
-    
+
     return {
       content: [
         {
-          type: "text",
-          text: typeof result === "string" ? result : JSON.stringify(result, null, 2)
+          type: 'text',
+          text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
         }
       ]
     };
@@ -345,8 +467,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return {
       content: [
         {
-          type: "text",
-          text: JSON.stringify({ error: error.message })
+          type: 'text',
+          text: JSON.stringify(serializeError(error), null, 2)
         }
       ],
       isError: true
@@ -358,10 +480,10 @@ async function main() {
   await kanban.ensureBacklogDir();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("markdown-kanban MCP server running");
+  console.error('kanbango MCP server running');
 }
 
 main().catch((error) => {
-  console.error("Fatal error in main():", error);
+  console.error('Fatal error in main():', error);
   process.exit(1);
 });

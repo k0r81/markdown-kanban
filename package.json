@@ -1,7 +1,7 @@
 {
-  "name": "markdown-kanban",
-  "version": "1.4.1",
-  "description": "Markdown-based local Kanban board with web GUI, CLI, and MCP server",
+  "name": "kanbango",
+  "version": "2.0.0",
+  "description": "JSON-first local Kanban board with web GUI, CLI, and MCP server",
   "main": "index.js",
   "bin": {
     "kanban": "bin/kanban.js",
@@ -26,12 +26,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/k0r81/markdown-kanban.git"
+    "url": "git+https://github.com/k0r81/kanbango.git"
   },
   "bugs": {
-    "url": "https://github.com/k0r81/markdown-kanban/issues"
+    "url": "https://github.com/k0r81/kanbango/issues"
   },
-  "homepage": "https://github.com/k0r81/markdown-kanban#readme",
+  "homepage": "https://github.com/k0r81/kanbango#readme",
   "engines": {
     "node": ">=16.0.0"
   },
