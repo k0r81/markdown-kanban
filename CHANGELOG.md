@@ -5,6 +5,14 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-09
+
+### Added
+- `test_cases` field (array of strings) as a first-class task attribute in all views (planning, execution, full)
+- `test_cases` parameter in `kanban_create` MCP tool input schema
+- Patch support for `test_cases` in `kanban_update` MCP tool
+- Markdown parsing of `## Test Cases` / `## Przypadki Testowe` sections
+
 ## [2.0.0] - 2026-07-07
 
 ### Added

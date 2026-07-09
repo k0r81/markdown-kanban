@@ -1,301 +1,89 @@
 # kanbango
 
-JSON-first local Kanban board with web GUI, CLI, and MCP server (pure JavaScript).
-
-## Features
-
-- 📊 Local Kanban board stored in JSON task files
-- 🎨 Modern web GUI with drag-and-drop interface
-- 🖥️ Full CLI support for automation and CI/CD
-- 🤖 AI-friendly API (JSON output)
-- 📁 Four columns: Active, Planned, Icebox, Done
-- ✅ Subtasks with progress tracking
-- 🏷️ Epic grouping
+JSON-first local Kanban board for developers and AI agents — CLI, web GUI, and MCP server in one lightweight package.
 
 ## Installation
 
-### Global (recommended)
+### Global (recommended for CLI)
 ```bash
 npm install -g kanbango
 ```
 
-### Local (per project)
+### Local per project (recommended for MCP)
 ```bash
 npm install -D kanbango
 ```
 
-### Using npx (no installation)
+### No install
 ```bash
 npx kanbango --help
 ```
 
-## NPM Package
-
-- Package name: `kanbango`
-- Binaries: `kanban`, `kanban-cmd`
-- MCP server entrypoint: `mcp-server.js` (run via `npx kanbango mcp`)
-
-## Requirements
-
-- Node.js 16+
-
 ## Quick Start
 
 ```bash
-# Initialize backlog structure
+# Initialize backlog directories
 kanban init
 
-# Start web GUI (opens http://localhost:5500)
+# Start web GUI at http://localhost:5500
 kanban serve
 
-# List all tasks (JSON)
+# List all tasks
 kanban list --json
 
-# Add a new task
-kanban add "New feature" --col planned --epic "Phase1"
+# Add a task
+kanban add "My task" --col planned --epic "Phase 1"
 
-# Show task details
+# Show details
 kanban show PI-001
 
-# Move task between columns
+# Move between columns (active | planned | icebox | done)
 kanban move PI-001 active
 
-# Toggle subtask
+# Toggle subtask completion
 kanban toggle PI-001 0
 ```
 
-## CLI Commands
+### Columns
 
-| Command | Description |
-|---------|-------------|
-| `kanban serve [PORT]` | Start web GUI (default: 5500) |
-| `kanban init` | Initialize backlog structure |
-| `kanban mcp-init` | Generate MCP config files for Claude Code / OpenCode |
-| `kanban list` | List all tasks |
-| `kanban show <ID>` | Show task details |
-| `kanban add <TITLE>` | Add new task |
-| `kanban move <ID> <COL>` | Move task to column |
-| `kanban toggle <ID> <IDX>` | Toggle subtask |
-
-## Columns
-
-- `active` — In progress (max 1-2 tasks)
-- `planned` — Planned for implementation
-- `icebox` — Frozen / nice-to-have
-- `done` — Completed
+| Column | Purpose |
+|--------|---------|
+| `active` | In progress (keep to 1–2 tasks) |
+| `planned` | Ready to implement |
+| `icebox` | Nice-to-have / frozen |
+| `done` | Completed |
 
 ## Data Structure
 
-Tasks are stored as JSON files in `backlog/<column>/`. Existing Markdown task files are still readable during migration:
+Tasks are JSON files in `backlog/<column>/`:
 
 ```json
 {
-  "id": "PI-001-feature-title",
-  "title": "Feature Title",
+  "id": "PI-001-my-feature",
+  "title": "My Feature",
   "column": "planned",
   "epic_group": "Phase 1",
-  "created": "2026-07-07",
-  "description": "High-level context and implementation plan.",
-  "specs": "Technical details and constraints.",
-  "acceptance_criteria": [
-    "First condition",
-    "Second condition"
-  ],
+  "created": "2026-07-08",
+  "description": "High-level context.",
+  "specs": "Technical details.",
+  "acceptance_criteria": ["Works as expected"],
   "subtasks": [
-    {
-      "id": "st-1",
-      "text": "First subtask",
-      "done": false,
-      "description": "Execution details for the subtask"
-    }
-  ],
-  "notes": "Optional freeform notes"
+    { "id": "st-1", "text": "First step", "done": false }
+  ]
 }
 ```
 
-## AI Integration
+## MCP Server (for Claude Code, OpenCode, Cursor)
 
-The `kanban-cmd` command provides simplified JSON output for AI agents:
+Run the MCP server to let AI agents read / create / update your board:
 
 ```bash
-# For AI: always use JSON output
-kanban-cmd list
-
-# Filter by column
-kanban-cmd list --col active
-
-# Show task details
-kanban-cmd show PI-001
-
-# Add task (AI-friendly)
-kanban-cmd add "New task" --col planned --epic "Phase 1"
-```
-
-### JSON Output Format
-
-```json
-[
-  {
-    "id": "PI-001-feature-title",
-    "title": "Feature Title",
-    "column": "planned",
-    "epic_group": "Phase 1",
-    "created": "2026-07-07",
-    "description": "High-level context and implementation plan.",
-    "specs": "Technical details and constraints.",
-    "acceptance_criteria": [
-      "First condition"
-    ],
-    "tasks": [
-      {
-        "id": "st-1",
-        "done": false,
-        "text": "First subtask",
-        "description": "Execution details for the subtask"
-      }
-    ]
-  }
-]
-```
-
-## MCP Task Views
-
-`kanban_read` supports compact response shaping so agents can avoid reading the whole task every time.
-
-```json
-{
-  "operation": "show",
-  "task_id": "PI-001-feature-title",
-  "view": "planning"
-}
-```
-
-Supported views:
-
-- `summary` - `id`, `title`, `column`, `epic_group`, `created`, `progress`
-- `planning` - summary + `description`, `specs`, `acceptance_criteria`
-- `execution` - planning + `subtasks`
-- `full` - execution + `notes`
-
-You can also request explicit fields:
-
-```json
-{
-  "operation": "show",
-  "task_id": "PI-001-feature-title",
-  "fields": ["title", "description", "acceptance_criteria"]
-}
-```
-
-`kanban_update` supports patch-style updates and compact responses:
-
-```json
-{
-  "operation": "update",
-  "task_id": "PI-001-feature-title",
-  "patch": {
-    "description": "Updated plan",
-    "acceptance_criteria": ["OAuth works"]
-  },
-  "return": "summary"
-}
-```
-
-Errors are returned as structured JSON:
-
-```json
-{
-  "error": {
-    "code": "TASK_NOT_FOUND",
-    "message": "Task PI-999-missing was not found",
-    "hint": "Call kanban_read with operation=list to discover valid task ids",
-    "details": {
-      "task_id": "PI-999-missing"
-    },
-    "retryable": false
-  }
-}
-```
-
-## Web GUI
-
-Start the web interface:
-```bash
-kanban serve 5500
-```
-
-Features:
-- Swimlanes grouped by epic
-- Drag-and-drop between columns
-- Inline editing
-- Real-time subtask checkboxes
-- Progress tracking
-
-## Directory Structure
-
-```
-backlog/
-├── active/    # Tasks in progress
-├── planned/   # Planned tasks
-├── icebox/    # Frozen tasks
-└── done/      # Completed tasks
-```
-
-## API for AI Agents
-
-See [API.md](API.md) for detailed API function definitions.
-
-## MCP Server
-
-This package includes a Model Context Protocol (MCP) server for integration with MCP-compatible clients.
-
-### Using the MCP server
-
-```bash
-# Run the MCP server directly
-npm run mcp
-
-# Or using npx
 npx kanbango mcp
 ```
 
-### MCP Configuration
+### Give it to your agent
 
-For MCP clients, add this to your configuration:
-
-```json
-{
-  "mcpServers": {
-    "kanbango": {
-      "command": "npx",
-      "args": ["kanbango", "mcp"]
-    }
-  }
-}
-```
-
-### MCP Per Project (Recommended)
-
-Install locally in the project so each repo controls its own MCP version:
-
-```bash
-npm install -D kanbango
-```
-
-Then point MCP to the local package:
-
-```json
-{
-  "mcpServers": {
-    "kanbango": {
-      "command": "node",
-      "args": ["./node_modules/kanbango/mcp-server.js"]
-    }
-  }
-}
-```
-
-If you prefer `npx`, you can still use it, but versioning is less explicit:
+Add this to your MCP client config (`.mcp.json`, `opencode.json`, or Claude Desktop config):
 
 ```json
 {
@@ -308,53 +96,60 @@ If you prefer `npx`, you can still use it, but versioning is less explicit:
 }
 ```
 
-### MCP Project Automation (Claude Code + OpenCode)
-
-Generate project configs automatically (creates `.mcp.json` and `opencode.json` in the current folder):
+Or generate the config files automatically:
 
 ```bash
-# Local install (recommended)
 npx kanbango mcp-init
-
-# Use npx-based command in configs
-npx kanbango mcp-init --npx
-
-# Only Claude Code config
-npx kanbango mcp-init --claude
-
-# Only OpenCode config
-npx kanbango mcp-init --opencode
-
-# Overwrite existing files
-npx kanbango mcp-init --force
 ```
 
-### Available MCP Tools
+### What the agent can do
 
-- `kanban_read` - Read tasks (list all, filter, or get specific task details)
-- `kanban_create` - Create a new task
-- `kanban_update` - Update tasks (move, toggle subtask, or edit details)
-- `kanban_gui_start` - Start the web GUI server (returns URL)
-- `kanban_gui_stop` - Stop the web GUI server
-- `kanban_gui_status` - Check GUI server status
+Once connected, your agent gets access to these tools:
 
-## Development
+| Tool | What it does |
+|------|-------------|
+| `kanban_read` | List tasks, filter by column/epic, show details |
+| `kanban_create` | Add new tasks |
+| `kanban_update` | Move, edit, toggle subtasks |
+| `kanban_gui_start` | Start web GUI from the agent |
+| `kanban_gui_stop` | Stop web GUI |
+| `kanban_gui_status` | Check if GUI is running |
+
+Your agent stays in sync with your real board — every change is persisted as JSON files.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `kanban init` | Create backlog directory structure |
+| `kanban serve [PORT]` | Start web GUI (default 5500) |
+| `kanban list [--col <col>] [--json]` | List tasks |
+| `kanban show <ID>` | Show task details |
+| `kanban add <TITLE>` | Add a new task |
+| `kanban move <ID> <COL>` | Move task |
+| `kanban toggle <ID> <IDX>` | Toggle subtask |
+| `kanban mcp-init` | Generate MCP config files |
+
+## Web GUI
 
 ```bash
-# Install dependencies
-npm install
-
-# Run tests
-npm test
-
-# Build (if needed)
-npm run build
+kanban serve
 ```
+- Swimlanes grouped by epic
+- Drag-and-drop between columns
+- Inline editing and subtask checkboxes
+
+## Using as a Node.js module
+
+```js
+const kanban = require('kanbango');
+const tasks = await kanban.allEpics();
+```
+
+## Requirements
+
+Node.js 16+
 
 ## License
 
 MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.

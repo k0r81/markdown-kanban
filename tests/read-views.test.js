@@ -14,6 +14,7 @@ async function run() {
     description: 'Planning context',
     specs: 'Technical specs',
     acceptance_criteria: ['One', 'Two'],
+    test_cases: ['TC1: Verify', 'TC2: Validate'],
     subtasks: [{ text: 'Ship it', description: 'Execution detail' }],
     notes: 'Extra notes'
   });
@@ -29,6 +30,7 @@ async function run() {
   assert.strictEqual(planning.description, 'Planning context');
   assert.strictEqual(planning.specs, 'Technical specs');
   assert.deepStrictEqual(planning.acceptance_criteria, ['One', 'Two']);
+  assert.deepStrictEqual(planning.test_cases, ['TC1: Verify', 'TC2: Validate']);
   assert.ok(!('subtasks' in planning), 'planning view should omit subtasks');
 
   const explicit = kanban.shapeTask(task, { fields: ['title', 'description', 'subtasks'] });

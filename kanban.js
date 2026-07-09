@@ -20,7 +20,8 @@ const VIEW_FIELDS = {
     'progress',
     'description',
     'specs',
-    'acceptance_criteria'
+    'acceptance_criteria',
+    'test_cases'
   ],
   execution: [
     'id',
@@ -32,6 +33,7 @@ const VIEW_FIELDS = {
     'description',
     'specs',
     'acceptance_criteria',
+    'test_cases',
     'subtasks'
   ],
   full: [
@@ -44,6 +46,7 @@ const VIEW_FIELDS = {
     'description',
     'specs',
     'acceptance_criteria',
+    'test_cases',
     'subtasks',
     'notes'
   ]
@@ -110,6 +113,7 @@ function normalizeTask(task) {
     description: normalizeString(task.description),
     specs: normalizeString(task.specs),
     acceptance_criteria: normalizeStringArray(task.acceptance_criteria),
+    test_cases: normalizeStringArray(task.test_cases),
     subtasks: normalizeSubtasks(task.subtasks || task.tasks),
     notes: normalizeString(task.notes)
   };
@@ -128,6 +132,7 @@ function serializeTask(task) {
     description: normalized.description,
     specs: normalized.specs,
     acceptance_criteria: normalized.acceptance_criteria,
+    test_cases: normalized.test_cases,
     subtasks: normalized.subtasks,
     notes: normalized.notes
   };
@@ -227,6 +232,7 @@ async function parseMarkdownTask(filePath, column) {
     description: extractSection(text, ['Opis', 'Description']),
     specs: extractSection(text, ['Specs', 'Specyfikacja']),
     acceptance_criteria: parseListSection(extractSection(text, ['Acceptance Criteria', 'Kryteria Akceptacji'])),
+    test_cases: parseListSection(extractSection(text, ['Test Cases', 'Przypadki Testowe'])),
     subtasks,
     notes: extractSection(text, ['Notes'])
   });
@@ -471,6 +477,7 @@ async function doCreate(title, column = 'planned', epicGroup = '—', extra = {}
     description: extra.description,
     specs: extra.specs,
     acceptance_criteria: extra.acceptance_criteria,
+    test_cases: extra.test_cases,
     subtasks: extra.subtasks,
     notes: extra.notes
   });
@@ -529,6 +536,19 @@ async function updateTask(taskId, patch) {
       );
     }
     next.acceptance_criteria = patch.acceptance_criteria;
+  }
+  if (patch.test_cases !== undefined) {
+    if (!Array.isArray(patch.test_cases)) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'test_cases must be an array of strings',
+        'Send test_cases as an array',
+        { field: 'test_cases' },
+        false,
+        400
+      );
+    }
+    next.test_cases = patch.test_cases;
   }
   if (patch.subtasks !== undefined || patch.tasks !== undefined) {
     const subtasks = patch.subtasks !== undefined ? patch.subtasks : patch.tasks;

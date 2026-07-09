@@ -219,6 +219,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'What must be true for the task to be complete',
               items: { type: 'string' }
             },
+            test_cases: {
+              type: 'array',
+              description: 'Test case scenarios verifying acceptance criteria',
+              items: { type: 'string' }
+            },
             subtasks: {
               type: 'array',
               description: 'Optional subtask list',
