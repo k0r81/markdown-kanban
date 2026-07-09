@@ -133,81 +133,78 @@ Get specific task details:
 
 ---
 
-### 2. kanban_create
+### 2. kanban_manage
 
-Create a new task on kanban board.
+Create, move, toggle subtasks, or patch-update kanban tasks. Single tool for all mutations.
 
-**Parameters:**
+**Actions:**
+- `create` - Create a new task with optional rich planning fields
+- `move` - Move a task to a different column
+- `toggle` - Toggle a subtask's completion status
+- `update` - Apply a field-level patch to any task attributes
+
+**Parameters (create):**
 ```json
 {
-  "title": "New feature implementation",  // Required
-  "col": "planned",  // Optional: "active" | "planned" | "icebox" | "done" (default: "planned")
-  "epic": "Phase 1"  // Optional: epic group name (default: "—")
+  "action": "create",
+  "title": "New feature",  // Required
+  "col": "planned",  // Optional, default "planned"
+  "epic": "Phase 1",  // Optional, default "—"
+  "description": "Context and plan",
+  "specs": "Technical constraints",
+  "acceptance_criteria": ["Must work"],
+  "test_cases": ["Verify X"],
+  "subtasks": [{"text": "Do it", "done": false}],
+  "notes": "Freeform notes"
+}
+```
+
+**Parameters (move):**
+```json
+{
+  "action": "move",
+  "task_id": "PI-014-google-calendar",  // Required
+  "column": "done"  // Required: target column
+}
+```
+
+**Parameters (toggle):**
+```json
+{
+  "action": "toggle",
+  "task_id": "PI-014-google-calendar",  // Required
+  "idx": 0  // Required: zero-based subtask index
+}
+```
+
+**Parameters (update):**
+```json
+{
+  "action": "update",
+  "task_id": "PI-014-google-calendar",  // Required
+  "patch": {"description": "New context"},  // Field-level patch object
+  "title": "New title",  // Shortcut, equivalent to patch.title
+  "tasks": [{"text": "A", "done": true}],  // Shortcut, equivalent to patch.subtasks
+  "return": "summary"  // "none" | "summary" | "full" (default "summary")
 }
 ```
 
 **Examples:**
 
-Create task with defaults:
+Create a task:
 ```json
 {
-  "title": "Add user authentication"
-}
-```
-
-Create task with custom column and epic:
-```json
-{
+  "action": "create",
   "title": "Database optimization",
   "col": "planned",
   "epic": "Performance"
 }
 ```
 
-**Response:**
-```json
-{
-  "id": "PI-015-database-optimization",
-  "title": "PI-015: Database optimization",
-  "column": "planned",
-  "epic_group": "Performance",
-  "created": "2026-03-16",
-  "tasks": []
-}
-```
-
----
-
-### 3. kanban_update
-
-Update existing tasks on kanban board. Can move tasks between columns, toggle subtask completion, or update task details.
-
-**Operations:**
-- `move` - Move task to different column
-- `toggle` - Toggle subtask completion
-- `update` - Update task title and/or subtask list
-
-**Parameters:**
-```json
-{
-  "operation": "move",  // "move" | "toggle" | "update"
-  "task_id": "PI-014-google-calendar",  // Required
-  "column": "done",  // Required for "move"
-  "idx": 0,  // Required for "toggle"
-  "title": "Updated title",  // Optional for "update"
-  "tasks": [  // Optional for "update"
-    { "done": true, "text": "Task 1" },
-    { "done": false, "text": "Task 2" }
-  ]
-}
-```
-
-**Examples:**
-
 Move task to done:
 ```json
 {
-  "operation": "move",
+  "action": "move",
   "task_id": "PI-014-google-calendar",
   "column": "done"
 }
@@ -216,67 +213,41 @@ Move task to done:
 Toggle first subtask:
 ```json
 {
-  "operation": "toggle",
+  "action": "toggle",
   "task_id": "PI-014-google-calendar",
   "idx": 0
 }
 ```
 
-Update task title:
+Patch-update task fields:
 ```json
 {
-  "operation": "update",
+  "action": "update",
   "task_id": "PI-014-google-calendar",
-  "title": "Google Calendar API Integration"
-}
-```
-
-Update subtasks:
-```json
-{
-  "operation": "update",
-  "task_id": "PI-014-google-calendar",
-  "tasks": [
-    { "done": true, "text": "API authentication" },
-    { "done": true, "text": "Event synchronization" },
-    { "done": false, "text": "Error handling" }
-  ]
-}
-```
-
-**Response (move):**
-```json
-{
-  "success": true,
-  "message": "Moved PI-014-google-calendar to done"
-}
-```
-
-**Response (toggle/update):**
-```json
-{
-  "id": "PI-014-google-calendar",
-  "title": "PI-014: Google Calendar Integration",
-  "column": "active",
-  "epic_group": "Phase 1",
-  "created": "2026-03-15",
-  "tasks": [
-    { "done": false, "text": "API authentication" },
-    { "done": false, "text": "Event synchronization" }
-  ]
+  "patch": {
+    "title": "Updated title",
+    "description": "New implementation plan",
+    "epic_group": "Phase 2"
+  }
 }
 ```
 
 ---
 
-### 4. kanban_gui_start
+### 3. kanban_gui
 
-Start the web GUI server for the kanban board.
+Control the web GUI server: start, stop, or check status.
+
+**Actions:**
+- `start` - Launch the GUI server
+- `stop` - Kill the GUI server
+- `status` - Check if the GUI is running
 
 **Parameters:**
 ```json
 {
-  "port": 5500  // Optional: port for GUI (default 5500)
+  "action": "start",  // "start" | "stop" | "status"
+  "port": 5500  // Optional, only for "start" (default 5500)
 }
 ```
 
@@ -284,17 +255,34 @@ Start the web GUI server for the kanban board.
 
 Start GUI on default port:
 ```json
-{}
+{
+  "action": "start"
+}
 ```
 
 Start GUI on custom port:
 ```json
 {
+  "action": "start",
   "port": 8080
 }
 ```
 
-**Response:**
+Stop the GUI:
+```json
+{
+  "action": "stop"
+}
+```
+
+Check status:
+```json
+{
+  "action": "status"
+}
+```
+
+**Response (start):**
 ```json
 {
   "status": "started",
@@ -304,18 +292,7 @@ Start GUI on custom port:
 }
 ```
 
----
-
-### 5. kanban_gui_stop
-
-Stop the web GUI server if it is running.
-
-**Parameters:**
-```json
-{}
-```
-
-**Response:**
+**Response (stop):**
 ```json
 {
   "status": "stopping",
@@ -323,18 +300,7 @@ Stop the web GUI server if it is running.
 }
 ```
 
----
-
-### 6. kanban_gui_status
-
-Get status of the web GUI server.
-
-**Parameters:**
-```json
-{}
-```
-
-**Response (running):**
+**Response (status - running):**
 ```json
 {
   "status": "running",
@@ -344,7 +310,7 @@ Get status of the web GUI server.
 }
 ```
 
-**Response (not running):**
+**Response (status - not running):**
 ```json
 {
   "status": "not_running"
@@ -387,51 +353,43 @@ Get status of the web GUI server.
 ### Pattern 1: Task Discovery
 
 ```json
-// List all active tasks
-{ "operation": "list", "col": "active" }
+{ "tool": "kanban_read", "arguments": { "operation": "list", "col": "active" } }
 ```
 
 ### Pattern 2: Task Creation Workflow
 
 ```json
 // 1. Create task
-{ "title": "New feature", "col": "planned", "epic": "Phase 1" }
+{ "tool": "kanban_manage", "arguments": { "action": "create", "title": "New feature", "col": "planned", "epic": "Phase 1" } }
 
 // 2. Get task details to see generated ID
-{ "operation": "show", "task_id": "PI-015-new-feature" }
+{ "tool": "kanban_read", "arguments": { "operation": "show", "task_id": "PI-015-new-feature" } }
 
 // 3. Update with subtasks
-{
-  "operation": "update",
-  "task_id": "PI-015-new-feature",
-  "tasks": [
-    { "done": false, "text": "Research" },
-    { "done": false, "text": "Implementation" }
-  ]
-}
+{ "tool": "kanban_manage", "arguments": { "action": "update", "task_id": "PI-015-new-feature", "tasks": [{"done": false, "text": "Research"}, {"done": false, "text": "Implementation"}] } }
 ```
 
 ### Pattern 3: Task Progression
 
 ```json
 // Move from planned → active
-{ "operation": "move", "task_id": "PI-015", "column": "active" }
+{ "tool": "kanban_manage", "arguments": { "action": "move", "task_id": "PI-015", "column": "active" } }
 
 // Mark subtask complete
-{ "operation": "toggle", "task_id": "PI-015", "idx": 0 }
+{ "tool": "kanban_manage", "arguments": { "action": "toggle", "task_id": "PI-015", "idx": 0 } }
 
 // Move from active → done
-{ "operation": "move", "task_id": "PI-015", "column": "done" }
+{ "tool": "kanban_manage", "arguments": { "action": "move", "task_id": "PI-015", "column": "done" } }
 ```
 
 ### Pattern 4: Epic Management
 
 ```json
 // List all tasks in an epic
-{ "operation": "list", "epic": "Performance" }
+{ "tool": "kanban_read", "arguments": { "operation": "list", "epic": "Performance" } }
 
 // Create task in specific epic
-{ "title": "Cache optimization", "epic": "Performance" }
+{ "tool": "kanban_manage", "arguments": { "action": "create", "title": "Cache optimization", "epic": "Performance" } }
 ```
 
 ---
@@ -439,29 +397,31 @@ Get status of the web GUI server.
 ## Best Practices for LLM Agents
 
 1. **Always use `kanban_read` first** - Discover existing tasks before creating new ones
-2. **Use `col` filter** - Narrow down to relevant column when listing
-3. **Use `epic` grouping** - Organize tasks by features/phases
-4. **Work through subtasks** - Toggle each subtask as you complete them
-5. **Move tasks through workflow** - planned → active → done progression
-6. **Use `show` operation** - Get full task details including subtasks
-7. **Handle task IDs** - Always use the full task ID returned from create/show
+2. **Numeric task lookup** - You can reference tasks by number alone (e.g. `"35"` for task `PI-035-whatever`). This works in any `task_id` parameter.
+3. **Use `col` filter** - Narrow down to relevant column when listing
+4. **Use `epic` grouping** - Organize tasks by features/phases
+5. **Work through subtasks** - Toggle each subtask as you complete them
+6. **Move tasks through workflow** - planned → active → done progression
+7. **Use `show` operation** - Get full task details including subtasks
+8. **Handle task IDs** - Always use the full task ID returned from create/show
 
 ---
 
 ## Error Handling
 
-All tools return error messages in this format:
+All tools return structured error responses:
 
 ```json
 {
-  "error": "Error message description"
+  "error": {
+    "code": "TASK_NOT_FOUND",
+    "message": "Task PI-999 was not found",
+    "hint": "Call kanban_read with operation=list to discover valid task ids",
+    "details": {},
+    "retryable": false
+  }
 }
 ```
-
-Common errors:
-- `"Task not found: PI-999"` - Task ID doesn't exist
-- `"Failed to move task: PI-999"` - Move operation failed
-- `"task_id is required for 'show' operation"` - Missing required parameter
 
 ---
 

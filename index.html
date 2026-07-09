@@ -71,6 +71,15 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   flex-shrink: 0;
 }
 .new-epic-strip.open { display: flex; }
+.ne-field { display: flex; flex-direction: column; gap: 3px; }
+.ne-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.ne-buttons { display: flex; gap: 8px; align-items: flex-end; }
 .ne-input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -396,6 +405,13 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   flex-direction: column;
   gap: 6px;
 }
+.lane-add-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
 .lane-add-title {
   width: 100%;
   border: 1px solid var(--planned);
@@ -457,20 +473,31 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   <h1>Donna Kanban</h1>
   <span class="hstats" id="hstats">—</span>
   <span class="hspacer"></span>
-  <button class="btn-new" id="btn-new" onclick="toggleNewForm()">+ Nowy task</button>
+  <button class="btn-new" id="btn-new" onclick="toggleNewForm()">+ New task</button>
 </header>
 
 <div class="new-epic-strip" id="new-strip">
-  <input class="ne-input ne-title" id="ne-title" placeholder="Nazwa taska…" autocomplete="off">
-  <select class="ne-input ne-col" id="ne-col">
-    <option value="icebox">🧊 Icebox</option>
-    <option value="planned" selected>📦 Planned</option>
-    <option value="active">🔥 Active</option>
-    <option value="done">✅ Done</option>
-  </select>
-  <input class="ne-input ne-group" id="ne-group" placeholder="Epik / Faza (opcjonalnie)…" autocomplete="off">
-  <button class="btn-sm btn-confirm" onclick="submitNew()">Dodaj</button>
-  <button class="btn-sm btn-cancel"  onclick="toggleNewForm()">Anuluj</button>
+  <div class="ne-field">
+    <div class="ne-label">Title</div>
+    <input class="ne-input ne-title" id="ne-title" placeholder="Task name…" autocomplete="off">
+  </div>
+  <div class="ne-field">
+    <div class="ne-label">Column</div>
+    <select class="ne-input ne-col" id="ne-col">
+      <option value="icebox">🧊 Icebox</option>
+      <option value="planned" selected>📦 Planned</option>
+      <option value="active">🔥 Active</option>
+      <option value="done">✅ Done</option>
+    </select>
+  </div>
+  <div class="ne-field">
+    <div class="ne-label">Epic</div>
+    <input class="ne-input ne-group" id="ne-group" placeholder="Epic group (optional)…" autocomplete="off">
+  </div>
+  <div class="ne-buttons">
+    <button class="btn-sm btn-confirm" onclick="submitNew()">Add</button>
+    <button class="btn-sm btn-cancel"  onclick="toggleNewForm()">Cancel</button>
+  </div>
 </div>
 
 <div id="board-wrap">
@@ -511,7 +538,7 @@ function render() {
   // Header stats
   const total = allEpics.length;
   const done  = allEpics.filter(e => e.column === "done").length;
-  document.getElementById("hstats").textContent = `${done}/${total} ukończone`;
+  document.getElementById("hstats").textContent = `${done}/${total} done`;
 
   // Col headers
   const hdr = document.getElementById("col-headers");
@@ -557,9 +584,9 @@ function renderSwimlane({ name, epics }) {
 
   hdr.innerHTML = `
     <span class="sl-arrow">▼</span>
-    <span class="sl-name">${escHtml(name === "—" ? "Pozostałe (bez epiku)" : name)}</span>
+    <span class="sl-name">${escHtml(name === "—" ? "Uncategorized (no epic)" : name)}</span>
     <span class="sl-cnt">${epics.length}</span>
-    ${pct !== null ? `<span class="sl-progress" style="margin-left:auto">${pct}% tasków</span>` : ""}
+    ${pct !== null ? `<span class="sl-progress" style="margin-left:auto">${pct}% tasks done</span>` : ""}
   `;
   hdr.onclick = () => {
     if (collapsed.has(name)) collapsed.delete(name);
@@ -577,7 +604,7 @@ function renderSwimlane({ name, epics }) {
     if (col.id !== "done") {
       const addBtn = document.createElement("button");
       addBtn.className = "lane-add";
-      addBtn.textContent = "+ Dodaj tutaj";
+      addBtn.textContent = "+ Add here";
       addBtn.onclick = e => { e.stopPropagation(); showLaneAdd(lane, col.id, name, addBtn); };
       lane.appendChild(addBtn);
     }
@@ -646,7 +673,7 @@ function renderCard(epic, colId) {
       // For icebox show just a count badge
       const badge = el("span", "prog-txt");
       badge.style.cssText = "display:inline-block;margin-top:5px;background:rgba(100,116,139,0.12);border-radius:4px;padding:1px 6px;";
-      badge.textContent = `${totalT} subtasków`;
+      badge.textContent = `${totalT} subtasks`;
       card.appendChild(badge);
     }
 
@@ -677,7 +704,7 @@ function renderCard(epic, colId) {
     if (totalT > 0) {
       const expBtn = document.createElement("button");
       expBtn.className = "cbtn";
-      expBtn.textContent = isExpanded ? "▲" : "▼ Subtaski";
+      expBtn.textContent = isExpanded ? "▲" : "▼ Subtasks";
       expBtn.onclick = e => { e.stopPropagation(); toggleExpand(epic.id); };
       actions.appendChild(expBtn);
     }
@@ -686,7 +713,7 @@ function renderCard(epic, colId) {
     const editBtn = document.createElement("button");
     editBtn.className = "cbtn edit-btn";
     editBtn.textContent = "✎";
-    editBtn.title = "Edytuj";
+    editBtn.title = "Edit";
     editBtn.onclick = e => { e.stopPropagation(); startEdit(epic.id); };
     actions.appendChild(editBtn);
 
@@ -695,7 +722,7 @@ function renderCard(epic, colId) {
     // Subtask list (expanded, view mode)
     if (isExpanded && totalT > 0) {
       const lbl = el("div", "subtask-label");
-      lbl.textContent = "Subtaski";
+      lbl.textContent = "Subtasks";
       card.appendChild(lbl);
 
       appendDetailSections(card, epic);
@@ -737,6 +764,7 @@ function renderEditMode(card, epic, colId, shortId) {
     description: epic.description || "",
     specs: epic.specs || "",
     acceptance_criteria: (epic.acceptance_criteria || []).join("\n"),
+    test_cases: (epic.test_cases || []).join("\n"),
     notes: epic.notes || "",
     tasks: epic.tasks.map(t => ({ ...t }))
   };
@@ -756,28 +784,32 @@ function renderEditMode(card, epic, colId, shortId) {
   card.appendChild(titleInput);
 
   const meta = el("div", "edit-meta");
-  meta.appendChild(renderEditBlock("Opis", dirty.description, value => {
+  meta.appendChild(renderEditBlock("Description", dirty.description, value => {
     dirty.description = value;
     dirtyEdits[epic.id] = dirty;
-  }, "Kontekst i plan implementacji..."));
+  }, "Context and implementation plan..."));
   meta.appendChild(renderEditBlock("Specs", dirty.specs, value => {
     dirty.specs = value;
     dirtyEdits[epic.id] = dirty;
-  }, "API, ograniczenia, edge case'y..."));
+  }, "APIs, constraints, edge cases..."));
   meta.appendChild(renderEditBlock("Acceptance Criteria", dirty.acceptance_criteria, value => {
     dirty.acceptance_criteria = value;
     dirtyEdits[epic.id] = dirty;
-  }, "Jeden warunek na linie"));
+  }, "One condition per line"));
+  meta.appendChild(renderEditBlock("Test Cases", dirty.test_cases, value => {
+    dirty.test_cases = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "One scenario per line"));
   meta.appendChild(renderEditBlock("Notes", dirty.notes, value => {
     dirty.notes = value;
     dirtyEdits[epic.id] = dirty;
-  }, "Opcjonalne notatki"));
+  }, "Optional notes"));
   card.appendChild(meta);
 
   // Subtasks section
   const editTasks = el("div", "edit-tasks");
   const subtaskLbl = el("div", "subtask-label");
-  subtaskLbl.textContent = "Subtaski";
+  subtaskLbl.textContent = "Subtasks";
   editTasks.appendChild(subtaskLbl);
 
   const taskRows = el("div");
@@ -808,14 +840,14 @@ function renderEditMode(card, epic, colId, shortId) {
 
       const desc = document.createElement("textarea");
       desc.className = "edit-task-desc";
-      desc.placeholder = "Opis subtaska...";
+      desc.placeholder = "Subtask description...";
       desc.value = task.description || "";
       desc.oninput = () => { dirty.tasks[idx].description = desc.value; dirtyEdits[epic.id] = dirty; };
 
       const delBtn = document.createElement("button");
       delBtn.className = "del-task";
       delBtn.textContent = "×";
-      delBtn.title = "Usuń subtask";
+      delBtn.title = "Remove subtask";
       delBtn.onclick = () => { dirty.tasks.splice(idx, 1); dirtyEdits[epic.id] = dirty; refreshRows(); };
 
       fields.appendChild(inp);
@@ -830,7 +862,7 @@ function renderEditMode(card, epic, colId, shortId) {
   // Add subtask input
   const addSubtaskInput = document.createElement("input");
   addSubtaskInput.className = "add-task-inp";
-  addSubtaskInput.placeholder = "+ Nowy subtask… (Enter)";
+  addSubtaskInput.placeholder = "+ New subtask… (Enter)";
   addSubtaskInput.onkeydown = e => {
     if (e.key === "Enter" && addSubtaskInput.value.trim()) {
       dirty.tasks.push({ done: false, text: addSubtaskInput.value.trim(), description: "" });
@@ -846,12 +878,12 @@ function renderEditMode(card, epic, colId, shortId) {
   const footer = el("div", "edit-footer");
   const saveBtn = document.createElement("button");
   saveBtn.className = "btn-sm btn-confirm";
-  saveBtn.textContent = "✓ Zapisz";
+  saveBtn.textContent = "✓ Save";
   saveBtn.onclick = async e => { e.stopPropagation(); await saveEdit(epic.id); };
 
-  const cancelBtn = document.createElement("button");
+const cancelBtn = document.createElement("button");
   cancelBtn.className = "btn-sm btn-cancel";
-  cancelBtn.textContent = "Anuluj";
+  cancelBtn.textContent = "Cancel";
   cancelBtn.onclick = e => {
     e.stopPropagation(); delete dirtyEdits[epic.id]; editingId = null; render();
   };
@@ -882,6 +914,7 @@ async function saveEdit(epicId) {
     body.description = dirty.description;
     body.specs = dirty.specs;
     body.acceptance_criteria = splitLines(dirty.acceptance_criteria);
+    body.test_cases = splitLines(dirty.test_cases);
     body.notes = dirty.notes;
     body.tasks = dirty.tasks.filter(t => t.text.trim()).map((task, idx) => ({
       id: task.id || `st-${idx + 1}`,
@@ -897,8 +930,8 @@ async function saveEdit(epicId) {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error();
-    toast("Zapisano ✓");
-  } catch { toast("Błąd zapisu!", true); }
+    toast("Saved ✓");
+  } catch { toast("Save error!", true); }
   delete dirtyEdits[epicId];
   editingId = null;
   await load();
@@ -917,22 +950,31 @@ function showLaneAdd(lane, colId, groupName, addBtn) {
   if (existing) { existing.remove(); return; }
 
   const wrap = el("div", "lane-addinp");
+
+  const titleLabel = el("div", "lane-add-label");
+  titleLabel.textContent = "Task title";
+  wrap.appendChild(titleLabel);
+
   const inp = document.createElement("input");
   inp.className = "lane-add-title";
-  inp.placeholder = "Nazwa nowego taska…";
+  inp.placeholder = "New task name…";
   inp.autocomplete = "off";
+
+  const descLabel = el("div", "lane-add-label");
+  descLabel.textContent = "Description";
+  wrap.appendChild(descLabel);
 
   const description = document.createElement("textarea");
   description.className = "lane-add-textarea";
-  description.placeholder = "Opis taska (opcjonalnie)...";
+  description.placeholder = "Task description (optional)...";
 
   const actions = el("div", "lane-add-actions");
   const confirmBtn = document.createElement("button");
   confirmBtn.className = "btn-sm btn-confirm";
-  confirmBtn.textContent = "Dodaj";
+  confirmBtn.textContent = "Add";
   const cancelBtn = document.createElement("button");
   cancelBtn.className = "btn-sm btn-cancel";
-  cancelBtn.textContent = "Anuluj";
+  cancelBtn.textContent = "Cancel";
 
   const doAdd = async () => {
     const title = inp.value.trim();
@@ -950,11 +992,11 @@ function showLaneAdd(lane, colId, groupName, addBtn) {
       }),
     });
     if (res.ok) {
-      toast("Dodano ✓");
+      toast("Added ✓");
       wrap.remove();
       await load();
     } else {
-      toast("Błąd!", true);
+      toast("Error!", true);
       inp.disabled = false;
       description.disabled = false;
       inp.focus();
@@ -996,13 +1038,13 @@ async function submitNew() {
     body: JSON.stringify({ title, column: col, epic_group: group || "—" }),
   });
   if (res.ok) {
-    toast("Dodano task ✓");
+    toast("Task added ✓");
     document.getElementById("ne-title").value = "";
     document.getElementById("ne-group").value = "";
     toggleNewForm();
     await load();
   } else {
-    toast("Błąd!", true);
+    toast("Error!", true);
   }
 }
 
@@ -1024,13 +1066,16 @@ function splitLines(value) {
 }
 function appendDetailSections(card, epic) {
   if (epic.description) {
-    card.appendChild(renderDetailSection("Opis", epic.description));
+    card.appendChild(renderDetailSection("Description", epic.description));
   }
   if (epic.specs) {
     card.appendChild(renderDetailSection("Specs", epic.specs));
   }
   if (epic.acceptance_criteria && epic.acceptance_criteria.length > 0) {
     card.appendChild(renderDetailListSection("Acceptance Criteria", epic.acceptance_criteria));
+  }
+  if (epic.test_cases && epic.test_cases.length > 0) {
+    card.appendChild(renderDetailListSection("Test Cases", epic.test_cases));
   }
   if (epic.notes) {
     card.appendChild(renderDetailSection("Notes", epic.notes));

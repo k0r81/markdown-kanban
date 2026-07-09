@@ -332,11 +332,42 @@ async function serveWeb(port) {
     }
   });
 
-  server.listen(port, 'localhost', () => {
-    console.log(`\x1b[1;32m→ Kanban GUI: http://localhost:${port}\x1b[0m`);
-    console.log(`  Backlog:   ${BACKLOG}`);
-    console.log('  Ctrl+C żeby zamknąć');
-  });
+  const MAX_ATTEMPTS = 10;
+
+  function listenOnce(server, port) {
+    return new Promise((resolve, reject) => {
+      function onError(err) {
+        server.removeListener('listening', onListening);
+        reject(err);
+      }
+      function onListening() {
+        server.removeListener('error', onError);
+        resolve();
+      }
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(port, 'localhost');
+    });
+  }
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      await listenOnce(server, port + attempt);
+      break;
+    } catch (err) {
+      if (err.code !== 'EADDRINUSE') throw err;
+      console.log(`Port ${port + attempt} zajęty, próbuję ${port + attempt + 1}…`);
+    }
+  }
+
+  if (!server.listening) {
+    console.log(`Porty ${port}–${port + MAX_ATTEMPTS - 1} zajęte, próbuję losowy port…`);
+    await listenOnce(server, 0);
+  }
+
+  console.log(`\x1b[1;32m→ Kanban GUI: http://localhost:${server.address().port}\x1b[0m`);
+  console.log(`  Backlog:   ${BACKLOG}`);
+  console.log('  Ctrl+C żeby zamknąć');
 }
 
 function readBody(req) {

@@ -5,6 +5,14 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-07-09
+
+### Changed
+- MCP tools consolidated from 6 to 3:
+  - `kanban_create` + `kanban_update` merged into `kanban_manage` with `action` parameter (`create` | `move` | `toggle` | `update`)
+  - `kanban_gui_start` + `kanban_gui_stop` + `kanban_gui_status` merged into `kanban_gui` with `action` parameter (`start` | `stop` | `status`)
+  - `kanban_read` unchanged
+
 ## [2.1.0] - 2026-07-09
 
 ### Added

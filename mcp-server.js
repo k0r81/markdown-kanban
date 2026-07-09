@@ -161,7 +161,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             task_id: {
               type: 'string',
-              description: "Task ID (required for 'show' operation, e.g. 'PI-014-google-calendar')"
+              description: "Task ID (optional for 'list', required for 'show'). Accepts full ID like 'PI-014' or just a number like '14'."
             },
             col: {
               type: 'string',
@@ -186,20 +186,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'kanban_create',
-        description: 'Create a new task on the kanban board with optional rich planning fields.',
+        name: 'kanban_manage',
+        description: 'Create, move, toggle subtasks, or apply patch-style updates with configurable response size.',
         inputSchema: {
           type: 'object',
           properties: {
+            action: {
+              type: 'string',
+              enum: ['create', 'move', 'toggle', 'update'],
+              description: "Action to perform: 'create' adds a task, 'move' changes column, 'toggle' flips one subtask, 'update' applies a patch"
+            },
             title: {
               type: 'string',
-              description: 'Title of new task'
+              description: "Title of new task (required for 'create')"
             },
             col: {
               type: 'string',
               enum: COLS,
               default: 'planned',
-              description: 'Column to place task in (active|planned|icebox|done)'
+              description: "Column to place task in (default: 'planned')"
             },
             epic: {
               type: 'string',
@@ -240,42 +245,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             notes: {
               type: 'string',
               description: 'Optional freeform notes'
-            }
-          },
-          required: ['title']
-        }
-      },
-      {
-        name: 'kanban_update',
-        description: 'Move tasks, toggle subtasks, or apply patch-style updates with configurable response size.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            operation: {
-              type: 'string',
-              enum: ['move', 'toggle', 'update'],
-              description: "'move' changes column, 'toggle' flips one subtask, 'update' applies a patch"
             },
             task_id: {
               type: 'string',
-              description: 'Task ID to update'
+              description: "Task ID (required for 'move', 'toggle', 'update'). Accepts full ID like 'PI-014' or just a number like '14'."
             },
             column: {
               type: 'string',
               enum: COLS,
-              description: "New column for 'move'"
+              description: "Target column (required for 'move')"
             },
             idx: {
               type: 'integer',
-              description: "Subtask index for 'toggle'"
+              description: "Subtask index (required for 'toggle')"
             },
             patch: {
               type: 'object',
               description: "Patch payload for 'update'"
-            },
-            title: {
-              type: 'string',
-              description: 'Backward-compatible title update shortcut'
             },
             tasks: {
               type: 'array',
@@ -296,36 +282,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Returned payload size after update. Defaults to summary.'
             }
           },
-          required: ['operation', 'task_id']
+          required: ['action']
         }
       },
       {
-        name: 'kanban_gui_start',
-        description: 'Start the web GUI server for the kanban board.',
+        name: 'kanban_gui',
+        description: 'Control the web GUI server: start, stop, or check status.',
         inputSchema: {
           type: 'object',
           properties: {
+            action: {
+              type: 'string',
+              enum: ['start', 'stop', 'status'],
+              description: "Action to perform: 'start' launches GUI, 'stop' kills it, 'status' checks if running"
+            },
             port: {
               type: 'integer',
-              description: 'Port for the GUI server (default 5500)'
+              description: "Port for the GUI server (default 5500, only for 'start')"
             }
-          }
-        }
-      },
-      {
-        name: 'kanban_gui_stop',
-        description: 'Stop the web GUI server if it is running.',
-        inputSchema: {
-          type: 'object',
-          properties: {}
-        }
-      },
-      {
-        name: 'kanban_gui_status',
-        description: 'Get status of the web GUI server.',
-        inputSchema: {
-          type: 'object',
-          properties: {}
+          },
+          required: ['action']
         }
       }
     ]
@@ -373,86 +349,137 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
 
-      case 'kanban_create': {
-        const created = await kanban.doCreate(args.title, args.col || 'planned', args.epic || '—', {
-          description: args.description,
-          specs: args.specs,
-          acceptance_criteria: args.acceptance_criteria,
-          subtasks: args.subtasks,
-          notes: args.notes
-        });
-        result = kanban.shapeTask(created, { view: 'full' });
-        break;
-      }
-
-      case 'kanban_update': {
-        const operation = args.operation;
+      case 'kanban_manage': {
+        const action = args.action;
         const returnShape = normalizeReturnShape(args.return);
 
-        if (operation === 'move') {
-          if (!args.column) {
-            throw invalidRequest(
-              "column is required for 'move'",
-              'Provide one target column',
-              { operation }
-            );
-          }
-          const updated = await kanban.updateTask(args.task_id, { column: args.column });
-          result = formatTaskResult(updated, returnShape);
-        } else if (operation === 'toggle') {
-          if (!Number.isInteger(args.idx)) {
-            throw invalidRequest(
-              "idx is required for 'toggle'",
-              'Provide a zero-based subtask index',
-              { operation, idx: args.idx }
-            );
-          }
-          const current = await kanban.getTask(args.task_id);
-          if (args.idx < 0 || args.idx >= current.subtasks.length) {
-            throw kanban.createKanbanError(
-              'INVALID_SUBTASK_INDEX',
-              `Subtask index ${args.idx} is not valid for task ${args.task_id}`,
-              'Read the task first and use an index between 0 and subtasks.length - 1',
-              { task_id: args.task_id, idx: args.idx, total_subtasks: current.subtasks.length },
-              false,
-              400
-            );
+        switch (action) {
+          case 'create': {
+            const created = await kanban.doCreate(args.title, args.col || 'planned', args.epic || '—', {
+              description: args.description,
+              specs: args.specs,
+              acceptance_criteria: args.acceptance_criteria,
+              test_cases: args.test_cases,
+              subtasks: args.subtasks,
+              notes: args.notes
+            });
+            result = kanban.shapeTask(created, { view: 'full' });
+            break;
           }
 
-          const subtasks = current.subtasks.map((subtask, idx) => ({
-            ...subtask,
-            done: idx === args.idx ? !subtask.done : subtask.done
-          }));
-          const updated = await kanban.updateTask(args.task_id, { subtasks });
-          result = formatTaskResult(updated, returnShape);
-        } else if (operation === 'update') {
-          const patch = args.patch ? { ...args.patch } : {};
-          if (args.title !== undefined) patch.title = args.title;
-          if (args.tasks !== undefined) patch.subtasks = args.tasks;
-          const updated = await kanban.updateTask(args.task_id, patch);
-          result = formatTaskResult(updated, returnShape);
-        } else {
-          throw invalidRequest(
-            `Unknown operation: ${operation}`,
-            'Use one of: move, toggle, update',
-            { operation }
-          );
+          case 'move': {
+            if (!args.task_id) {
+              throw invalidRequest(
+                "task_id is required for 'move'",
+                'Provide a task ID',
+                { action }
+              );
+            }
+            if (!args.column) {
+              throw invalidRequest(
+                "column is required for 'move'",
+                'Provide one target column',
+                { action }
+              );
+            }
+            const updated = await kanban.updateTask(args.task_id, { column: args.column });
+            result = formatTaskResult(updated, returnShape);
+            break;
+          }
+
+          case 'toggle': {
+            if (!args.task_id) {
+              throw invalidRequest(
+                "task_id is required for 'toggle'",
+                'Provide a task ID',
+                { action }
+              );
+            }
+            if (!Number.isInteger(args.idx)) {
+              throw invalidRequest(
+                "idx is required for 'toggle'",
+                'Provide a zero-based subtask index',
+                { action, idx: args.idx }
+              );
+            }
+            const current = await kanban.getTask(args.task_id);
+            if (args.idx < 0 || args.idx >= current.subtasks.length) {
+              throw kanban.createKanbanError(
+                'INVALID_SUBTASK_INDEX',
+                `Subtask index ${args.idx} is not valid for task ${args.task_id}`,
+                'Read the task first and use an index between 0 and subtasks.length - 1',
+                { task_id: args.task_id, idx: args.idx, total_subtasks: current.subtasks.length },
+                false,
+                400
+              );
+            }
+
+            const subtasks = current.subtasks.map((subtask, idx) => ({
+              ...subtask,
+              done: idx === args.idx ? !subtask.done : subtask.done
+            }));
+            const updated = await kanban.updateTask(args.task_id, { subtasks });
+            result = formatTaskResult(updated, returnShape);
+            break;
+          }
+
+          case 'update': {
+            if (!args.task_id) {
+              throw invalidRequest(
+                "task_id is required for 'update'",
+                'Provide a task ID',
+                { action }
+              );
+            }
+            const patch = args.patch ? { ...args.patch } : {};
+            if (args.title !== undefined) patch.title = args.title;
+            if (args.tasks !== undefined) patch.subtasks = args.tasks;
+            if (args.description !== undefined) patch.description = args.description;
+            if (args.specs !== undefined) patch.specs = args.specs;
+            if (args.acceptance_criteria !== undefined) patch.acceptance_criteria = args.acceptance_criteria;
+            if (args.test_cases !== undefined) patch.test_cases = args.test_cases;
+            if (args.subtasks !== undefined) patch.subtasks = args.subtasks;
+            if (args.notes !== undefined) patch.notes = args.notes;
+            if (args.epic !== undefined) patch.epic_group = args.epic;
+            if (args.col !== undefined) patch.column = args.col;
+            const updated = await kanban.updateTask(args.task_id, patch);
+            result = formatTaskResult(updated, returnShape);
+            break;
+          }
+
+          default:
+            throw invalidRequest(
+              `Unknown action: ${action}`,
+              'Use one of: create, move, toggle, update',
+              { action }
+            );
         }
         break;
       }
 
-      case 'kanban_gui_start': {
-        result = await startGuiServer(args.port);
-        break;
-      }
+      case 'kanban_gui': {
+        const action = args.action;
 
-      case 'kanban_gui_stop': {
-        result = stopGuiServer();
-        break;
-      }
-
-      case 'kanban_gui_status': {
-        result = guiStatus();
+        switch (action) {
+          case 'start': {
+            result = await startGuiServer(args.port);
+            break;
+          }
+          case 'stop': {
+            result = stopGuiServer();
+            break;
+          }
+          case 'status': {
+            result = guiStatus();
+            break;
+          }
+          default:
+            throw invalidRequest(
+              `Unknown action: ${action}`,
+              'Use one of: start, stop, status',
+              { action }
+            );
+        }
         break;
       }
 

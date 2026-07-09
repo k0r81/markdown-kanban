@@ -45,7 +45,7 @@ async function run() {
   });
   assert.deepStrictEqual(
     Object.keys(summary),
-    ['id', 'title', 'column', 'epic_group', 'created', 'progress'],
+    ['task_number', 'title', 'column', 'epic_group', 'created', 'progress'],
     'kanban_read summary view should be compact'
   );
 
@@ -54,9 +54,9 @@ async function run() {
     id: 2,
     method: 'tools/call',
     params: {
-      name: 'kanban_update',
+      name: 'kanban_manage',
       arguments: {
-        operation: 'update',
+        action: 'update',
         task_id: task.id,
         patch: { description: 'Updated context' },
         return: 'summary'

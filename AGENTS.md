@@ -560,7 +560,7 @@ After making changes, verify:
 1. CLI works: `node bin/kanban.js list --json`
 2. Web GUI starts: `node bin/kanban.js serve` (Ctrl+C to stop)
 3. MCP server tools: `echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node mcp-server.js`
-4. All three tools work: kanban_read, kanban_create, kanban_update
+4. All three tools work: kanban_read, kanban_manage, kanban_gui
 
 ## Common Patterns to Avoid
 

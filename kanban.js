@@ -10,9 +10,9 @@ const STATUS_MAP = {
   done: 'done'
 };
 const VIEW_FIELDS = {
-  summary: ['id', 'title', 'column', 'epic_group', 'created', 'progress'],
+  summary: ['task_number', 'title', 'column', 'epic_group', 'created', 'progress'],
   planning: [
-    'id',
+    'task_number',
     'title',
     'column',
     'epic_group',
@@ -24,7 +24,7 @@ const VIEW_FIELDS = {
     'test_cases'
   ],
   execution: [
-    'id',
+    'task_number',
     'title',
     'column',
     'epic_group',
@@ -37,7 +37,7 @@ const VIEW_FIELDS = {
     'subtasks'
   ],
   full: [
-    'id',
+    'task_number',
     'title',
     'column',
     'epic_group',
@@ -74,6 +74,11 @@ function normalizeString(value, fallback = '') {
   return typeof value === 'string' ? value.trim() : fallback;
 }
 
+function extractTaskNumber(taskId) {
+  const match = normalizeString(taskId).match(/^[A-Z]+-(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -104,9 +109,10 @@ function withLegacyTaskAlias(task) {
 }
 
 function normalizeTask(task) {
+  const id = normalizeString(task.id);
   const normalized = {
-    id: normalizeString(task.id),
-    title: stripTitlePrefix(task.title || task.id),
+    id,
+    title: stripTitlePrefix(task.title || id),
     column: COLS.includes(task.column) ? task.column : 'planned',
     epic_group: normalizeString(task.epic_group, '—') || '—',
     created: normalizeString(task.created) || todayIso(),
@@ -115,7 +121,8 @@ function normalizeTask(task) {
     acceptance_criteria: normalizeStringArray(task.acceptance_criteria),
     test_cases: normalizeStringArray(task.test_cases),
     subtasks: normalizeSubtasks(task.subtasks || task.tasks),
-    notes: normalizeString(task.notes)
+    notes: normalizeString(task.notes),
+    task_number: extractTaskNumber(id)
   };
 
   return withLegacyTaskAlias(normalized);
@@ -134,7 +141,8 @@ function serializeTask(task) {
     acceptance_criteria: normalized.acceptance_criteria,
     test_cases: normalized.test_cases,
     subtasks: normalized.subtasks,
-    notes: normalized.notes
+    notes: normalized.notes,
+    task_number: normalized.task_number
   };
 }
 
@@ -323,7 +331,8 @@ async function findFile(epicId) {
 }
 
 async function getTask(taskId) {
-  const filePath = await findFile(taskId);
+  const resolvedId = await resolveTaskId(taskId);
+  const filePath = await findFile(resolvedId);
   if (!filePath) {
     throw createKanbanError(
       'TASK_NOT_FOUND',
@@ -337,6 +346,34 @@ async function getTask(taskId) {
 
   const column = path.basename(path.dirname(filePath));
   return parseEpic(filePath, column);
+}
+
+async function resolveTaskId(input) {
+  if (!input) return null;
+
+  const exact = await findFile(String(input));
+  if (exact) return String(input);
+
+  const num = parseInt(String(input), 10);
+  if (!Number.isFinite(num)) return null;
+
+  for (const col of COLS) {
+    const colDir = path.join(BACKLOG, col);
+    try {
+      const files = await fs.readdir(colDir);
+      const rawPattern = new RegExp(`^[A-Z]+-${String(num)}-`);
+      const paddedPattern = new RegExp(`^[A-Z]+-${String(num).padStart(3, '0')}-`);
+      const match = files.find((file) => {
+        const base = path.basename(file, path.extname(file));
+        return rawPattern.test(base) || paddedPattern.test(base + '-');
+      });
+      if (match) return path.basename(match, path.extname(match));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  return String(input);
 }
 
 async function writeTask(task, previousFilePath = null) {
@@ -488,7 +525,8 @@ async function doCreate(title, column = 'planned', epicGroup = '—', extra = {}
 async function updateTask(taskId, patch) {
   validatePatch(patch);
 
-  const previousFilePath = await findFile(taskId);
+  const resolvedId = await resolveTaskId(taskId);
+  const previousFilePath = await findFile(resolvedId);
   if (!previousFilePath) {
     throw createKanbanError(
       'TASK_NOT_FOUND',
@@ -639,6 +677,7 @@ module.exports = {
   doCreate,
   createKanbanError,
   getProgress,
+  resolveTaskId,
   COLS,
   STATUS_MAP,
   VIEW_FIELDS

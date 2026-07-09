@@ -109,11 +109,8 @@ Once connected, your agent gets access to these tools:
 | Tool | What it does |
 |------|-------------|
 | `kanban_read` | List tasks, filter by column/epic, show details |
-| `kanban_create` | Add new tasks |
-| `kanban_update` | Move, edit, toggle subtasks |
-| `kanban_gui_start` | Start web GUI from the agent |
-| `kanban_gui_stop` | Stop web GUI |
-| `kanban_gui_status` | Check if GUI is running |
+| `kanban_manage` | Create, move, toggle subtasks, patch-update |
+| `kanban_gui` | Start, stop, or check web GUI status |
 
 Your agent stays in sync with your real board — every change is persisted as JSON files.
 
