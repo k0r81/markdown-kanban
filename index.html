@@ -387,6 +387,20 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   line-height: 1.45;
   color: var(--text);
 }
+.detail-section.out-of-scope {
+  border-left: 3px solid #e8b4b4;
+  padding-left: 8px;
+}
+.detail-section.out-of-scope .detail-label {
+  color: #a86a6a;
+}
+.detail-section.out-of-scope .detail-list {
+  color: #7a5a5a;
+}
+.edit-block.out-of-scope {
+  border-color: #e8c4c4;
+  background: #fffbfb;
+}
 .edit-meta {
   display: flex;
   flex-direction: column;
@@ -578,8 +592,8 @@ function renderSwimlane({ name, epics }) {
 
   // Header
   const hdr = el("div", `sl-header${isCollapsed ? " collapsed" : ""}`);
-  const totalTasks = epics.reduce((s, e) => s + e.tasks.length, 0);
-  const doneTasks  = epics.reduce((s, e) => s + e.tasks.filter(t => t.done).length, 0);
+  const totalTasks = epics.reduce((s, e) => s + e.subtasks.length, 0);
+  const doneTasks  = epics.reduce((s, e) => s + e.subtasks.filter(t => t.done).length, 0);
   const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : null;
 
   hdr.innerHTML = `
@@ -640,8 +654,8 @@ function renderCard(epic, colId) {
   const card = el("div", `card col-${colId}${isExpanded ? " open" : ""}${isEditing ? " editing" : ""}`);
   card.dataset.id = epic.id;
 
-  const totalT = epic.tasks.length;
-  const doneT  = epic.tasks.filter(t => t.done).length;
+  const totalT = epic.subtasks.length;
+  const doneT  = epic.subtasks.filter(t => t.done).length;
   const pct    = totalT > 0 ? Math.round(doneT / totalT * 100) : 0;
   const shortId = (epic.id.match(/^PI-\d+/) || [epic.id])[0];
   const displayTitle = epic.title.replace(/^[\w.-]+:\s*/, "");
@@ -700,14 +714,12 @@ function renderCard(epic, colId) {
       actions.appendChild(rb);
     }
 
-    // Expand subtasks button
-    if (totalT > 0) {
-      const expBtn = document.createElement("button");
-      expBtn.className = "cbtn";
-      expBtn.textContent = isExpanded ? "▲" : "▼ Subtasks";
-      expBtn.onclick = e => { e.stopPropagation(); toggleExpand(epic.id); };
-      actions.appendChild(expBtn);
-    }
+    // Expand details button
+    const expBtn = document.createElement("button");
+    expBtn.className = "cbtn";
+    expBtn.textContent = isExpanded ? "▲" : "▼ Details";
+    expBtn.onclick = e => { e.stopPropagation(); toggleExpand(epic.id); };
+    actions.appendChild(expBtn);
 
     // Edit button
     const editBtn = document.createElement("button");
@@ -719,38 +731,40 @@ function renderCard(epic, colId) {
 
     card.appendChild(actions);
 
-    // Subtask list (expanded, view mode)
-    if (isExpanded && totalT > 0) {
-      const lbl = el("div", "subtask-label");
-      lbl.textContent = "Subtasks";
-      card.appendChild(lbl);
-
+    // Details + subtasks (expanded, view mode)
+    if (isExpanded) {
       appendDetailSections(card, epic);
 
-      const list = el("div", "tasks-list");
-      epic.tasks.forEach((task, idx) => {
-        const row = el("div", `task-row${task.done ? " done" : ""}`);
-        const cbId = `v-${epic.id}-${idx}`;
-        row.innerHTML = `
-          <input type="checkbox" id="${cbId}" ${task.done ? "checked" : ""}>
-          <div class="task-copy">
-            <label for="${cbId}">${escHtml(task.text)}</label>
-            ${task.description ? `<div class="task-desc">${escHtml(task.description)}</div>` : ""}
-          </div>
-        `;
-        row.querySelector("input").onchange = async function() {
-          this.disabled = true;
-          await fetch(`/api/epics/${enc(epic.id)}/tasks/${idx}`, { method: "PATCH" });
-          await load();
-        };
-        list.appendChild(row);
-      });
-      card.appendChild(list);
+      if (totalT > 0) {
+        const lbl = el("div", "subtask-label");
+        lbl.textContent = "Subtasks";
+        card.appendChild(lbl);
+
+        const list = el("div", "tasks-list");
+        epic.subtasks.forEach((task, idx) => {
+          const row = el("div", `task-row${task.done ? " done" : ""}`);
+          const cbId = `v-${epic.id}-${idx}`;
+          row.innerHTML = `
+            <input type="checkbox" id="${cbId}" ${task.done ? "checked" : ""}>
+            <div class="task-copy">
+              <label for="${cbId}">${escHtml(task.text)}</label>
+              ${task.description ? `<div class="task-desc">${escHtml(task.description)}</div>` : ""}
+            </div>
+          `;
+          row.querySelector("input").onchange = async function() {
+            this.disabled = true;
+            await fetch(`/api/epics/${enc(epic.id)}/tasks/${idx}`, { method: "PATCH" });
+            await load();
+          };
+          list.appendChild(row);
+        });
+        card.appendChild(list);
+      }
     }
 
     card.onclick = e => {
       if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT" || e.target.tagName === "LABEL") return;
-      if (totalT > 0) toggleExpand(epic.id);
+      toggleExpand(epic.id);
     };
   }
 
@@ -763,10 +777,12 @@ function renderEditMode(card, epic, colId, shortId) {
     title: displayTitle,
     description: epic.description || "",
     specs: epic.specs || "",
+    in_scope: (epic.in_scope || []).join("\n"),
+    out_of_scope: (epic.out_of_scope || []).join("\n"),
     acceptance_criteria: (epic.acceptance_criteria || []).join("\n"),
     test_cases: (epic.test_cases || []).join("\n"),
     notes: epic.notes || "",
-    tasks: epic.tasks.map(t => ({ ...t }))
+    tasks: epic.subtasks.map(t => ({ ...t }))
   };
   dirtyEdits[epic.id] = dirty;
 
@@ -792,6 +808,14 @@ function renderEditMode(card, epic, colId, shortId) {
     dirty.specs = value;
     dirtyEdits[epic.id] = dirty;
   }, "APIs, constraints, edge cases..."));
+  meta.appendChild(renderEditBlock("In Scope", dirty.in_scope, value => {
+    dirty.in_scope = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "What this task covers (one item per line)"));
+  meta.appendChild(renderEditBlock("Out of Scope", dirty.out_of_scope, value => {
+    dirty.out_of_scope = value;
+    dirtyEdits[epic.id] = dirty;
+  }, "What is explicitly not included (one item per line)", "out-of-scope"));
   meta.appendChild(renderEditBlock("Acceptance Criteria", dirty.acceptance_criteria, value => {
     dirty.acceptance_criteria = value;
     dirtyEdits[epic.id] = dirty;
@@ -913,10 +937,12 @@ async function saveEdit(epicId) {
     if (dirty.title !== origTitle) body.title = dirty.title;
     body.description = dirty.description;
     body.specs = dirty.specs;
+    body.in_scope = splitLines(dirty.in_scope);
+    body.out_of_scope = splitLines(dirty.out_of_scope);
     body.acceptance_criteria = splitLines(dirty.acceptance_criteria);
     body.test_cases = splitLines(dirty.test_cases);
     body.notes = dirty.notes;
-    body.tasks = dirty.tasks.filter(t => t.text.trim()).map((task, idx) => ({
+    body.subtasks = dirty.tasks.filter(t => t.text.trim()).map((task, idx) => ({
       id: task.id || `st-${idx + 1}`,
       text: task.text.trim(),
       done: Boolean(task.done),
@@ -1071,6 +1097,12 @@ function appendDetailSections(card, epic) {
   if (epic.specs) {
     card.appendChild(renderDetailSection("Specs", epic.specs));
   }
+  if (epic.in_scope && epic.in_scope.length > 0) {
+    card.appendChild(renderDetailListSection("In Scope", epic.in_scope));
+  }
+  if (epic.out_of_scope && epic.out_of_scope.length > 0) {
+    card.appendChild(renderDetailListSection("Out of Scope", epic.out_of_scope, "out-of-scope"));
+  }
   if (epic.acceptance_criteria && epic.acceptance_criteria.length > 0) {
     card.appendChild(renderDetailListSection("Acceptance Criteria", epic.acceptance_criteria));
   }
@@ -1091,8 +1123,8 @@ function renderDetailSection(label, text) {
   wrap.appendChild(textEl);
   return wrap;
 }
-function renderDetailListSection(label, items) {
-  const wrap = el("div", "detail-section");
+function renderDetailListSection(label, items, extraClass) {
+  const wrap = el("div", extraClass ? `detail-section ${extraClass}` : "detail-section");
   const labelEl = el("div", "detail-label");
   labelEl.textContent = label;
   const list = el("ul", "detail-list");
@@ -1105,12 +1137,12 @@ function renderDetailListSection(label, items) {
   wrap.appendChild(list);
   return wrap;
 }
-function renderEditBlock(label, value, onInput, placeholder) {
-  const wrap = el("div");
+function renderEditBlock(label, value, onInput, placeholder, extraClass) {
+  const wrap = el("div", extraClass ? `detail-section ${extraClass}` : null);
   const labelEl = el("div", "detail-label");
   labelEl.textContent = label;
   const textarea = document.createElement("textarea");
-  textarea.className = "edit-block";
+  textarea.className = extraClass ? `edit-block ${extraClass}` : "edit-block";
   textarea.value = value;
   textarea.placeholder = placeholder;
   textarea.oninput = () => onInput(textarea.value);

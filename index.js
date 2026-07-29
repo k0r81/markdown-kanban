@@ -9,7 +9,9 @@
  */
 
 const kanban = require('./kanban.js');
+const plan = require('./plan.js');
 
 module.exports = {
   kanban,
+  plan,
 };

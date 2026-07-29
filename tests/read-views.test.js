@@ -13,6 +13,8 @@ async function run() {
   const task = await kanban.doCreate('Read views', 'planned', 'Phase 1', {
     description: 'Planning context',
     specs: 'Technical specs',
+    in_scope: ['Login flow'],
+    out_of_scope: ['SSO'],
     acceptance_criteria: ['One', 'Two'],
     test_cases: ['TC1: Verify', 'TC2: Validate'],
     subtasks: [{ text: 'Ship it', description: 'Execution detail' }],
@@ -22,13 +24,15 @@ async function run() {
   const summary = kanban.shapeTask(task, { view: 'summary' });
   assert.deepStrictEqual(
     Object.keys(summary),
-    ['id', 'title', 'column', 'epic_group', 'created', 'progress'],
+    ['task_number', 'title', 'column', 'epic_group', 'created', 'progress'],
     'summary view should only expose compact fields'
   );
 
   const planning = kanban.shapeTask(task, { view: 'planning' });
   assert.strictEqual(planning.description, 'Planning context');
   assert.strictEqual(planning.specs, 'Technical specs');
+  assert.deepStrictEqual(planning.in_scope, ['Login flow']);
+  assert.deepStrictEqual(planning.out_of_scope, ['SSO']);
   assert.deepStrictEqual(planning.acceptance_criteria, ['One', 'Two']);
   assert.deepStrictEqual(planning.test_cases, ['TC1: Verify', 'TC2: Validate']);
   assert.ok(!('subtasks' in planning), 'planning view should omit subtasks');

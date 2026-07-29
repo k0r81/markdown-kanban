@@ -42,7 +42,7 @@ Documentation for interacting with local Kanban system (kanban.py).
     "properties": {
       "task_id": {
         "type": "string",
-        "description": "Task ID (e.g. 'PI-014-google-calendar')"
+        "description": "Numeric task ID (e.g. '014')"
       }
     },
     "required": ["task_id"],
@@ -108,8 +108,8 @@ Documentation for interacting with local Kanban system (kanban.py).
 ```json
 {
   "type": "function",
-  "name": "kanban_toggle",
-  "description": "Toggle checkbox state for subtask (done/not done).",
+  "name": "kanban_update",
+  "description": "Update task fields, including the full subtasks list.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -117,12 +117,20 @@ Documentation for interacting with local Kanban system (kanban.py).
         "type": "string",
         "description": "Parent task ID"
       },
-      "idx": {
-        "type": "integer",
-        "description": "Subtask index (starting from 0)"
+      "subtasks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "text": { "type": "string" },
+            "done": { "type": "boolean" },
+            "description": { "type": "string" }
+          }
+        }
       }
     },
-    "required": ["task_id", "idx"],
+    "required": ["task_id", "subtasks"],
     "additionalProperties": false
   }
 }
@@ -138,16 +146,16 @@ python kanban.py list --json
 python kanban.py list --col active --json
 
 # Show task details
-python kanban.py show PI-014-google-calendar
+python kanban.py show 014
 
 # Add new task
 python kanban.py add "New function" --col planned --epic "Faza 6"
 
 # Move task to different column
-python kanban.py move PI-014-google-calendar active
+python kanban.py move 014 active
 
-# Toggle subtask
-python kanban.py toggle PI-014-google-calendar 0
+# Update subtasks
+python kanban.py update 014 '{"subtasks":[{"done":true,"text":"Research"},{"done":false,"text":"Implementation"}]}'
 ```
 
 ## Kanban Columns
@@ -167,7 +175,7 @@ python kanban.py toggle PI-014-google-calendar 0
   "column": "active|planned|icebox|done",
   "epic_group": "string",
   "created": "string",
-  "tasks": [
+  "subtasks": [
     {
       "done": "boolean",
       "text": "string"

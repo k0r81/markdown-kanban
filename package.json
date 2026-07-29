@@ -1,6 +1,6 @@
 {
   "name": "kanbango",
-  "version": "2.1.1",
+  "version": "2.5.0",
   "description": "JSON-first local Kanban board with web GUI, CLI, and MCP server",
   "main": "index.js",
   "bin": {

@@ -5,19 +5,53 @@ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio
 const { CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 const { spawn } = require('child_process');
 const path = require('path');
+const pkg = require('./package.json');
 const kanban = require('./kanban.js');
+const plan = require('./plan.js');
 
 const COLS = kanban.COLS;
 const READ_VIEWS = Object.keys(kanban.VIEW_FIELDS);
+const GUI_READY_TIMEOUT_MS = 8000;
+const GUI_READY_POLL_MS = 50;
 let guiProcess = null;
 let guiPort = null;
 
 function normalizePort(value) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
-    return null;
+  return kanban.normalizeGuiPort(value);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function envFlagEnabled(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return false;
+  return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
+}
+
+async function waitForGuiReady(pid, timeoutMs = GUI_READY_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (guiProcess && guiProcess.pid === pid && guiProcess.exitCode !== null) {
+      throw invalidRequest(
+        'GUI process exited before becoming ready',
+        'Check whether another process holds the port or inspect MCP stderr',
+        { pid }
+      );
+    }
+
+    const info = await kanban.discoverRunningGui();
+    if (info && info.pid === pid) return info;
+
+    await sleep(GUI_READY_POLL_MS);
   }
-  return parsed;
+
+  throw invalidRequest(
+    'Timed out waiting for GUI to publish its port',
+    'Retry kanban_gui start or set KANBANGO_GUI_PORT to a free port',
+    { pid, timeout_ms: timeoutMs }
+  );
 }
 
 function serializeError(error) {
@@ -34,6 +68,34 @@ function serializeError(error) {
 
 function invalidRequest(message, hint, details) {
   return kanban.createKanbanError('VALIDATION_ERROR', message, hint, details, false, 400);
+}
+
+function serializeResult(result) {
+  if (typeof result === 'string') return result;
+
+  const text = JSON.stringify(result, null, 2);
+  if (typeof text === 'string') return text;
+
+  throw kanban.createKanbanError(
+    'INTERNAL_ERROR',
+    'Tool completed without a response payload',
+    'This is a server bug. Inspect the MCP handler for the requested tool/action.',
+    { result_type: typeof result },
+    true,
+    500
+  );
+}
+
+function textResponse(result, isError = false) {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: serializeResult(result)
+      }
+    ],
+    ...(isError ? { isError: true } : {})
+  };
 }
 
 function normalizeReturnShape(returnShape) {
@@ -79,63 +141,122 @@ function formatTaskResult(task, returnShape) {
 }
 
 async function startGuiServer(port) {
-  const desiredPort = normalizePort(port ?? 5500);
-  if (!desiredPort) {
+  if (port !== undefined && port !== null && port !== '' && !normalizePort(port)) {
     throw invalidRequest('Invalid port', 'Use an integer between 1 and 65535', { port });
   }
 
-  if (guiProcess && guiProcess.exitCode === null) {
+  if (guiProcess && guiProcess.exitCode === null && guiPort) {
     return {
       status: 'already_running',
       port: guiPort,
+      pid: guiProcess.pid,
       url: `http://localhost:${guiPort}`
     };
   }
 
+  const existing = await kanban.discoverRunningGui();
+  if (existing) {
+    guiPort = existing.port;
+    return {
+      status: 'already_running',
+      port: existing.port,
+      pid: existing.pid,
+      url: existing.url
+    };
+  }
+
+  const desiredPort = kanban.resolvePreferredGuiPort(port);
   await kanban.ensureBacklogDir();
 
   const scriptPath = path.join(__dirname, 'bin', 'kanban.js');
   guiProcess = spawn(process.execPath, [scriptPath, 'serve', String(desiredPort)], {
+    cwd: process.cwd(),
     stdio: 'ignore',
-    windowsHide: true
+    windowsHide: true,
+    detached: false
   });
-  guiPort = desiredPort;
 
+  const childPid = guiProcess.pid;
   guiProcess.on('exit', () => {
-    guiProcess = null;
-    guiPort = null;
+    if (guiProcess && guiProcess.pid === childPid) {
+      guiProcess = null;
+      guiPort = null;
+    }
   });
+
+  const ready = await waitForGuiReady(childPid);
+  guiPort = ready.port;
 
   return {
     status: 'started',
-    port: desiredPort,
-    pid: guiProcess.pid,
-    url: `http://localhost:${desiredPort}`
+    port: ready.port,
+    pid: ready.pid,
+    url: ready.url
   };
 }
 
-function stopGuiServer() {
-  if (!guiProcess || guiProcess.exitCode !== null) {
+async function stopGuiServer() {
+  const trackedRunning = guiProcess && guiProcess.exitCode === null;
+  const discovered = trackedRunning ? null : await kanban.discoverRunningGui();
+
+  if (!trackedRunning && !discovered) {
     guiProcess = null;
     guiPort = null;
     return { status: 'not_running' };
   }
 
-  guiProcess.kill();
-  return { status: 'stopping', port: guiPort };
+  const port = trackedRunning ? guiPort : discovered.port;
+  const pid = trackedRunning ? guiProcess.pid : discovered.pid;
+
+  if (trackedRunning) {
+    guiProcess.kill();
+  } else if (pid) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // process may already be gone
+    }
+  }
+
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    const still = await kanban.discoverRunningGui();
+    if (!still || still.pid !== pid) break;
+    await sleep(50);
+  }
+
+  await kanban.clearGuiPortFile({ force: true });
+  guiProcess = null;
+  guiPort = null;
+
+  return { status: 'stopping', port, pid };
 }
 
-function guiStatus() {
-  if (!guiProcess || guiProcess.exitCode !== null) {
+async function guiStatus() {
+  if (guiProcess && guiProcess.exitCode === null && guiPort) {
+    return {
+      status: 'running',
+      port: guiPort,
+      pid: guiProcess.pid,
+      url: `http://localhost:${guiPort}`
+    };
+  }
+
+  const discovered = await kanban.discoverRunningGui();
+  if (!discovered) {
+    guiProcess = null;
+    guiPort = null;
     return { status: 'not_running' };
   }
-  return { status: 'running', port: guiPort, pid: guiProcess.pid, url: `http://localhost:${guiPort}` };
+
+  guiPort = discovered.port;
+  return discovered;
 }
 
 const server = new Server(
   {
     name: 'kanbango',
-    version: '2.0.0'
+    version: pkg.version
   },
   {
     capabilities: {
@@ -149,7 +270,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'kanban_read',
-        description: 'Read tasks from kanban board with compact views or explicit fields.',
+        description: 'Read tasks from the board. operation=list returns multiple tasks with optional col/epic filters. operation=show requires task_id. Use view for preset payload sizes or fields for exact field selection.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -161,7 +282,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             task_id: {
               type: 'string',
-              description: "Task ID (optional for 'list', required for 'show'). Accepts full ID like 'PI-014' or just a number like '14'."
+                description: "Task ID (optional for 'list', required for 'show'). Use a numeric ID like '014' or just a number like '14'."
             },
             col: {
               type: 'string',
@@ -182,56 +303,67 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Explicit fields to return. When provided, fields override view.',
               items: { type: 'string' }
             }
-          }
+          },
+          additionalProperties: false
         }
       },
       {
         name: 'kanban_manage',
-        description: 'Create, move, toggle subtasks, or apply patch-style updates with configurable response size.',
+        description: 'Mutate tasks and accepted plans. Required by action: create/plan_create -> title only; move -> task_id + column; update -> task_id + patch/shortcuts; plan_advance/plan_done/plan_status -> task_id; plan_evidence -> task_id + diff + test_command + stdout + stderr + exit_code. Strongly recommended on create/plan_create: description, specs, in_scope, out_of_scope, acceptance_criteria (missing fields return warnings, not errors). Example: {"action":"create","title":"Ship Docker image","description":"...","specs":"...","in_scope":["CLI"],"out_of_scope":["GUI"],"acceptance_criteria":["npm test passes"],"col":"planned","epic":"Release"}.',
         inputSchema: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
-              enum: ['create', 'move', 'toggle', 'update'],
-              description: "Action to perform: 'create' adds a task, 'move' changes column, 'toggle' flips one subtask, 'update' applies a patch"
+               enum: ['create', 'move', 'update', 'plan_create', 'plan_advance', 'plan_evidence', 'plan_done', 'plan_status'],
+               description: 'Create, move, update, or operate the accepted-plan workflow'
             },
             title: {
               type: 'string',
-              description: "Title of new task (required for 'create')"
+              description: "Non-empty title. Required for 'create' and 'plan_create'."
             },
             col: {
               type: 'string',
               enum: COLS,
               default: 'planned',
-              description: "Column to place task in (default: 'planned')"
+              description: "Column for 'create' or shortcut patch field for 'update' (default: 'planned')."
             },
             epic: {
               type: 'string',
               default: '—',
-              description: 'Epic group name (optional)'
+              description: "Epic group for 'create', 'update', or 'plan_create' (optional)."
             },
             description: {
               type: 'string',
-              description: 'High-level context and implementation plan'
+              description: "Strongly recommended. High-level context/why for 'create', 'update', or 'plan_create'."
             },
             specs: {
               type: 'string',
-              description: 'Technical constraints, APIs, and edge cases'
+              description: "Strongly recommended. Technical constraints, APIs, and edge cases for 'create', 'update', or 'plan_create'."
+            },
+            in_scope: {
+              type: 'array',
+              description: "Strongly recommended. What this task includes (boundaries) for 'create', 'update', or 'plan_create'.",
+              items: { type: 'string' }
+            },
+            out_of_scope: {
+              type: 'array',
+              description: "Strongly recommended. Explicit non-goals / exclusions for 'create', 'update', or 'plan_create'.",
+              items: { type: 'string' }
             },
             acceptance_criteria: {
               type: 'array',
-              description: 'What must be true for the task to be complete',
+              description: "Strongly recommended. Completion requirements for 'create', 'update', or 'plan_create'.",
               items: { type: 'string' }
             },
             test_cases: {
               type: 'array',
-              description: 'Test case scenarios verifying acceptance criteria',
+              description: "Recommended. Verification scenarios for 'create', 'update', or 'plan_create'.",
               items: { type: 'string' }
             },
             subtasks: {
               type: 'array',
-              description: 'Optional subtask list',
+              description: "Optional subtask list for 'create', 'update', or internally generated by 'plan_create'.",
               items: {
                 type: 'object',
                 properties: {
@@ -244,45 +376,62 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             notes: {
               type: 'string',
-              description: 'Optional freeform notes'
+              description: "Optional freeform notes for 'create', 'update', or 'plan_create'."
             },
             task_id: {
               type: 'string',
-              description: "Task ID (required for 'move', 'toggle', 'update'). Accepts full ID like 'PI-014' or just a number like '14'."
+                description: "Task ID required for 'move', 'update', and all plan_* actions except 'plan_create'. Use '014' or '14'."
             },
             column: {
               type: 'string',
               enum: COLS,
-              description: "Target column (required for 'move')"
-            },
-            idx: {
-              type: 'integer',
-              description: "Subtask index (required for 'toggle')"
+              description: "Target column required for 'move'."
             },
             patch: {
               type: 'object',
-              description: "Patch payload for 'update'"
-            },
-            tasks: {
-              type: 'array',
-              description: 'Backward-compatible subtask update shortcut',
-              items: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  done: { type: 'boolean' },
-                  text: { type: 'string' },
-                  description: { type: 'string' }
-                }
-              }
+              description: "Patch payload for 'update'. Use this for bulk field changes; top-level shortcuts are merged into the patch."
             },
             return: {
               type: 'string',
               enum: ['none', 'summary', 'full'],
-              description: 'Returned payload size after update. Defaults to summary.'
+              description: "Response shape for 'move' and 'update'. Defaults to summary. 'create' returns the full created task."
+            },
+            index: {
+              type: 'integer',
+              description: "Zero-based plan subtask index for 'plan_advance'. Defaults to the first incomplete step when omitted."
+            },
+            steps: {
+              type: 'array',
+              items: { type: 'string' },
+              description: "Implementation steps inserted between the default plan workflow steps for 'plan_create'."
+            },
+            project_root: {
+              type: 'string',
+              description: "Project root used for test runner detection in 'plan_create'. Defaults to the MCP server working directory."
+            },
+            diff: {
+              type: 'string',
+              description: "Required for 'plan_evidence'. Include the relevant code diff or summary."
+            },
+            test_command: {
+              type: 'string',
+              description: "Required for 'plan_evidence'. The exact verification command that was run."
+            },
+            stdout: {
+              type: 'string',
+              description: "Required for 'plan_evidence'. Captured standard output from the verification command."
+            },
+            stderr: {
+              type: 'string',
+              description: "Required for 'plan_evidence'. Captured standard error from the verification command."
+            },
+            exit_code: {
+              type: 'integer',
+              description: "Required for 'plan_evidence'. Integer process exit code from the verification command."
             }
           },
-          required: ['action']
+          required: ['action'],
+          additionalProperties: false
         }
       },
       {
@@ -298,10 +447,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             port: {
               type: 'integer',
-              description: "Port for the GUI server (default 5500, only for 'start')"
+              description: "Port for the GUI server (only for 'start'). Defaults to KANBANGO_GUI_PORT or a stable hash of the project cwd (5510-5999)."
             }
           },
-          required: ['action']
+          required: ['action'],
+          additionalProperties: false
         }
       }
     ]
@@ -355,15 +505,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         switch (action) {
           case 'create': {
-            const created = await kanban.doCreate(args.title, args.col || 'planned', args.epic || '—', {
+            const createPayload = {
               description: args.description,
               specs: args.specs,
+              in_scope: args.in_scope,
+              out_of_scope: args.out_of_scope,
               acceptance_criteria: args.acceptance_criteria,
               test_cases: args.test_cases,
               subtasks: args.subtasks,
               notes: args.notes
-            });
-            result = kanban.shapeTask(created, { view: 'full' });
+            };
+            const created = await kanban.doCreate(args.title, args.col || 'planned', args.epic || '—', createPayload);
+            const shaped = kanban.shapeTask(created, { view: 'full' });
+            const warnings = kanban.createFieldWarnings(createPayload);
+            result = warnings.length > 0
+              ? { ...shaped, warnings, missing_recommended: kanban.missingRecommendedCreateFields(createPayload) }
+              : shaped;
             break;
           }
 
@@ -387,42 +544,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             break;
           }
 
-          case 'toggle': {
-            if (!args.task_id) {
-              throw invalidRequest(
-                "task_id is required for 'toggle'",
-                'Provide a task ID',
-                { action }
-              );
-            }
-            if (!Number.isInteger(args.idx)) {
-              throw invalidRequest(
-                "idx is required for 'toggle'",
-                'Provide a zero-based subtask index',
-                { action, idx: args.idx }
-              );
-            }
-            const current = await kanban.getTask(args.task_id);
-            if (args.idx < 0 || args.idx >= current.subtasks.length) {
-              throw kanban.createKanbanError(
-                'INVALID_SUBTASK_INDEX',
-                `Subtask index ${args.idx} is not valid for task ${args.task_id}`,
-                'Read the task first and use an index between 0 and subtasks.length - 1',
-                { task_id: args.task_id, idx: args.idx, total_subtasks: current.subtasks.length },
-                false,
-                400
-              );
-            }
-
-            const subtasks = current.subtasks.map((subtask, idx) => ({
-              ...subtask,
-              done: idx === args.idx ? !subtask.done : subtask.done
-            }));
-            const updated = await kanban.updateTask(args.task_id, { subtasks });
-            result = formatTaskResult(updated, returnShape);
-            break;
-          }
-
           case 'update': {
             if (!args.task_id) {
               throw invalidRequest(
@@ -433,9 +554,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             const patch = args.patch ? { ...args.patch } : {};
             if (args.title !== undefined) patch.title = args.title;
-            if (args.tasks !== undefined) patch.subtasks = args.tasks;
             if (args.description !== undefined) patch.description = args.description;
             if (args.specs !== undefined) patch.specs = args.specs;
+            if (args.in_scope !== undefined) patch.in_scope = args.in_scope;
+            if (args.out_of_scope !== undefined) patch.out_of_scope = args.out_of_scope;
             if (args.acceptance_criteria !== undefined) patch.acceptance_criteria = args.acceptance_criteria;
             if (args.test_cases !== undefined) patch.test_cases = args.test_cases;
             if (args.subtasks !== undefined) patch.subtasks = args.subtasks;
@@ -447,10 +569,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             break;
           }
 
+          case 'plan_create': {
+            result = await plan.create(args);
+            const planWarnings = kanban.createFieldWarnings(args);
+            if (planWarnings.length > 0 && result && typeof result === 'object') {
+              result = {
+                ...result,
+                warnings: planWarnings,
+                missing_recommended: kanban.missingRecommendedCreateFields(args)
+              };
+            }
+            break;
+          }
+          case 'plan_advance':
+            result = await plan.advance({ task_id: args.task_id, index: args.index });
+            break;
+          case 'plan_evidence':
+            result = await plan.evidence(args);
+            break;
+          case 'plan_done':
+            result = await plan.done({ task_id: args.task_id });
+            break;
+          case 'plan_status':
+            result = await plan.status(args.task_id);
+            break;
+
           default:
             throw invalidRequest(
               `Unknown action: ${action}`,
-              'Use one of: create, move, toggle, update',
+              'Use create, move, update, plan_create, plan_advance, plan_evidence, plan_done, or plan_status',
               { action }
             );
         }
@@ -466,11 +613,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             break;
           }
           case 'stop': {
-            result = stopGuiServer();
+            result = await stopGuiServer();
             break;
           }
           case 'status': {
-            result = guiStatus();
+            result = await guiStatus();
             break;
           }
           default:
@@ -487,35 +634,79 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw invalidRequest(`Unknown tool: ${name}`, 'Call tools/list to discover available tools', { name });
     }
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
-        }
-      ]
-    };
+    return textResponse(result);
   } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(serializeError(error), null, 2)
-        }
-      ],
-      isError: true
-    };
+    return textResponse(serializeError(error), true);
   }
 });
 
+async function maybeAutoStartGui() {
+  if (!envFlagEnabled('KANBANGO_AUTO_GUI')) return null;
+
+  try {
+    const result = await startGuiServer();
+    console.error(`kanbango GUI ${result.status}: ${result.url}`);
+    return result;
+  } catch (error) {
+    console.error(`kanbango GUI auto-start failed: ${error.message}`);
+    return null;
+  }
+}
+
+function installGuiShutdownHooks() {
+  let shuttingDown = false;
+
+  async function shutdown() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      await stopGuiServer();
+    } catch {
+      // best-effort
+    }
+  }
+
+  process.once('exit', () => {
+    if (guiProcess && guiProcess.exitCode === null) {
+      try {
+        guiProcess.kill();
+      } catch {
+        // ignore
+      }
+    }
+  });
+  process.once('SIGINT', () => {
+    shutdown().finally(() => process.exit(0));
+  });
+  process.once('SIGTERM', () => {
+    shutdown().finally(() => process.exit(0));
+  });
+}
+
 async function main() {
   await kanban.ensureBacklogDir();
+  installGuiShutdownHooks();
+  await maybeAutoStartGui();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('kanbango MCP server running');
 }
 
-main().catch((error) => {
-  console.error('Fatal error in main():', error);
-  process.exit(1);
-});
+module.exports = {
+  serializeError,
+  serializeResult,
+  textResponse,
+  startGuiServer,
+  stopGuiServer,
+  guiStatus,
+  resolvePreferredGuiPort: kanban.resolvePreferredGuiPort,
+  server,
+  main
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('Fatal error in main():', error);
+    process.exit(1);
+  });
+}

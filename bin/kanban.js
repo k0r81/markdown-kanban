@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 const kanban = require('../kanban.js');
+const plan = require('../plan.js');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
 const BACKLOG = path.join(process.cwd(), 'backlog');
-const COLS = kanban.COLS;
 
 function shortId(taskId) {
-  const match = taskId.match(/^(PI-\d+[\w.-]*|BUG-\d+|CHORE-\d+)/);
+  const match = taskId.match(/^(?:[A-Z]+-)?(\d+)/);
   return match ? match[1] : taskId;
 }
 
@@ -222,21 +222,6 @@ async function cliAdd(title, column, epicGroup) {
   }
 }
 
-async function cliToggle(taskId, idx) {
-  const success = await kanban.doToggle(taskId, idx);
-  if (!success) {
-    console.error(`✗ Nie znaleziono: ${taskId} subtask ${idx}`);
-    process.exit(1);
-  }
-
-  const task = await kanban.getTask(taskId);
-  if (idx < task.subtasks.length) {
-    const subtask = task.subtasks[idx];
-    const mark = subtask.done ? '✓' : '○';
-    console.log(`  [${idx}] ${mark} ${subtask.text}`);
-  }
-}
-
 async function serveWeb(port) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
 
@@ -262,7 +247,10 @@ async function serveWeb(port) {
         const task = await kanban.doCreate(body.title || '', body.column || 'planned', body.epic_group || '—', {
           description: body.description,
           specs: body.specs,
+          in_scope: body.in_scope,
+          out_of_scope: body.out_of_scope,
           acceptance_criteria: body.acceptance_criteria,
+          test_cases: body.test_cases,
           subtasks: body.subtasks,
           notes: body.notes
         });
@@ -312,10 +300,12 @@ async function serveWeb(port) {
           const patch = body.patch ? { ...body.patch } : {};
 
           if (body.title !== undefined) patch.title = body.title;
-          if (body.tasks !== undefined) patch.subtasks = body.tasks;
           if (body.description !== undefined) patch.description = body.description;
           if (body.specs !== undefined) patch.specs = body.specs;
+          if (body.in_scope !== undefined) patch.in_scope = body.in_scope;
+          if (body.out_of_scope !== undefined) patch.out_of_scope = body.out_of_scope;
           if (body.acceptance_criteria !== undefined) patch.acceptance_criteria = body.acceptance_criteria;
+          if (body.test_cases !== undefined) patch.test_cases = body.test_cases;
           if (body.subtasks !== undefined) patch.subtasks = body.subtasks;
           if (body.notes !== undefined) patch.notes = body.notes;
           if (body.epic_group !== undefined) patch.epic_group = body.epic_group;
@@ -365,7 +355,31 @@ async function serveWeb(port) {
     await listenOnce(server, 0);
   }
 
-  console.log(`\x1b[1;32m→ Kanban GUI: http://localhost:${server.address().port}\x1b[0m`);
+  const actualPort = server.address().port;
+  const portInfo = await kanban.writeGuiPortFile({ port: actualPort, pid: process.pid });
+
+  async function cleanupGuiPortFile() {
+    try {
+      await kanban.clearGuiPortFile({ pid: process.pid });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+
+  server.on('close', () => {
+    cleanupGuiPortFile();
+  });
+
+  process.once('SIGINT', async () => {
+    await cleanupGuiPortFile();
+    server.close(() => process.exit(0));
+  });
+  process.once('SIGTERM', async () => {
+    await cleanupGuiPortFile();
+    server.close(() => process.exit(0));
+  });
+
+  console.log(`\x1b[1;32m→ Kanban GUI: ${portInfo.url}\x1b[0m`);
   console.log(`  Backlog:   ${BACKLOG}`);
   console.log('  Ctrl+C żeby zamknąć');
 }
@@ -410,12 +424,41 @@ async function cliMigrate(dryRun) {
   }
 }
 
+function parseJsonPayload(value) {
+  try {
+    return JSON.parse(value || '{}');
+  } catch (error) {
+    throw kanban.createKanbanError('INVALID_JSON', 'Payload is not valid JSON',
+      'Pass a JSON object after --json', { reason: error.message }, false, 400);
+  }
+}
+
+async function cliPlan(action, payload) {
+  try {
+    const handlers = {
+      create: plan.create,
+      advance: plan.advance,
+      evidence: plan.evidence,
+      done: plan.done,
+      status: (input) => plan.status(input.task_id)
+    };
+    if (!handlers[action]) throw kanban.createKanbanError('INVALID_PLAN_ACTION', `Unknown plan action: ${action}`,
+      'Use create, advance, evidence, done, or status', { action }, false, 400);
+    console.log(JSON.stringify(await handlers[action](payload)));
+  } catch (error) {
+    console.log(JSON.stringify({ ok: false, task_id: payload.task_id || null, subtasks: [], error: {
+      code: error.code || 'INTERNAL_ERROR', message: error.message, hint: error.hint || '', details: error.details || {}
+    } }));
+    process.exitCode = 1;
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0];
 
   if (!cmd || cmd === 'serve') {
-    const port = parseInt(args[1] || '5500', 10);
+    const port = kanban.resolvePreferredGuiPort(args[1]);
     await serveWeb(port);
   } else if (cmd === 'init') {
     await cliInit();
@@ -479,8 +522,8 @@ async function main() {
     }
 
     await cliAdd(args[1], column, epicGroup);
-  } else if (cmd === 'toggle' && args[1] && args[2]) {
-    await cliToggle(args[1], parseInt(args[2], 10));
+  } else if (cmd === 'plan' && args[1] && args[2] === '--json') {
+    await cliPlan(args[1], parseJsonPayload(args[3]));
   } else {
     console.error('Unknown command:', cmd);
     process.exit(1);

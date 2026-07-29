@@ -25,7 +25,7 @@ npx kanbango --help
 # Initialize backlog directories
 kanban init
 
-# Start web GUI at http://localhost:5500
+# Start web GUI (stable project port; prints the real URL)
 kanban serve
 
 # List all tasks
@@ -35,13 +35,13 @@ kanban list --json
 kanban add "My task" --col planned --epic "Phase 1"
 
 # Show details
-kanban show PI-001
+kanban show 001
 
 # Move between columns (active | planned | icebox | done)
-kanban move PI-001 active
+kanban move 001 active
 
-# Toggle subtask completion
-kanban toggle PI-001 0
+# Update subtasks in one call
+kanban update 001 '{"subtasks":[{"done":true,"text":"Research"},{"done":false,"text":"Implementation"}]}'
 ```
 
 ### Columns
@@ -59,14 +59,17 @@ Tasks are JSON files in `backlog/<column>/`:
 
 ```json
 {
-  "id": "PI-001-my-feature",
+  "id": "001",
   "title": "My Feature",
   "column": "planned",
   "epic_group": "Phase 1",
   "created": "2026-07-08",
   "description": "High-level context.",
   "specs": "Technical details.",
+  "in_scope": ["What this task covers"],
+  "out_of_scope": ["What is explicitly excluded"],
   "acceptance_criteria": ["Works as expected"],
+  "test_cases": ["Verify the happy path"],
   "subtasks": [
     { "id": "st-1", "text": "First step", "done": false }
   ]
@@ -96,6 +99,24 @@ Add this to your MCP client config (`.mcp.json`, `opencode.json`, or Claude Desk
 }
 ```
 
+Auto-start the web GUI with MCP (opt-in):
+
+```json
+{
+  "mcpServers": {
+    "kanbango": {
+      "command": "npx",
+      "args": ["kanbango", "mcp"],
+      "env": {
+        "KANBANGO_AUTO_GUI": "1"
+      }
+    }
+  }
+}
+```
+
+Optional: pin the port with `KANBANGO_GUI_PORT` (e.g. `"5821"`). Without it, each project gets a stable port in `5510–5999` derived from the project path. The real URL is always available via `kanban_gui` → `status` (and written to `backlog/.kanbango-gui.json` while the GUI runs).
+
 Or generate the config files automatically:
 
 ```bash
@@ -109,8 +130,8 @@ Once connected, your agent gets access to these tools:
 | Tool | What it does |
 |------|-------------|
 | `kanban_read` | List tasks, filter by column/epic, show details |
-| `kanban_manage` | Create, move, toggle subtasks, patch-update |
-| `kanban_gui` | Start, stop, or check web GUI status |
+| `kanban_manage` | Create, move, patch-update tasks |
+| `kanban_gui` | Start, stop, or check web GUI status (returns the real URL/port) |
 
 Your agent stays in sync with your real board — every change is persisted as JSON files.
 
@@ -119,12 +140,11 @@ Your agent stays in sync with your real board — every change is persisted as J
 | Command | Description |
 |---------|-------------|
 | `kanban init` | Create backlog directory structure |
-| `kanban serve [PORT]` | Start web GUI (default 5500) |
+| `kanban serve [PORT]` | Start web GUI (stable project port, or PORT / KANBANGO_GUI_PORT) |
 | `kanban list [--col <col>] [--json]` | List tasks |
 | `kanban show <ID>` | Show task details |
 | `kanban add <TITLE>` | Add a new task |
 | `kanban move <ID> <COL>` | Move task |
-| `kanban toggle <ID> <IDX>` | Toggle subtask |
 | `kanban mcp-init` | Generate MCP config files |
 
 ## Web GUI

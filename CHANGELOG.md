@@ -5,13 +5,44 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-07-27
+
+### Changed
+- Create field policy: only `title` is hard-required; `description`, `specs`, `in_scope`, `out_of_scope`, and `acceptance_criteria` are strongly recommended
+- MCP `kanban_manage` create/plan_create returns `warnings` + `missing_recommended` when recommended fields are omitted (still succeeds)
+- MCP tool descriptions and LLM agent docs push agents to always fill planning boundaries
+
+## [2.4.0] - 2026-07-27
+
+### Added
+- Opt-in GUI auto-start with MCP via `KANBANGO_AUTO_GUI=1`
+- Stable per-project GUI port (hash of cwd in `5510–5999`), overridable with `KANBANGO_GUI_PORT` or `kanban serve [PORT]`
+- `backlog/.kanbango-gui.json` port file so the real URL is always discoverable
+- `kanban_gui status` discovers a running GUI even outside the MCP child-process tracker
+
+### Changed
+- `kanban serve` default port is no longer hard-coded `5500`; uses preferred/stable port resolution
+- `kanban_gui start` waits for the server to publish its actual listen port before returning
+
+## [2.3.0] - 2026-07-27
+
+### Added
+- `in_scope` and `out_of_scope` fields (arrays of strings) for task boundaries in planning/execution/full views
+- MCP `kanban_manage` create/update support for `in_scope` and `out_of_scope`
+- Web GUI edit/view sections for In Scope and Out of Scope (muted styling for exclusions)
+- Markdown migrate support for `## In Scope` / `## Out of Scope` (and PL headings)
+
+### Fixed
+- HTTP API now forwards `test_cases` on create and update (GUI saves were previously dropped)
+
 ## [2.2.0] - 2026-07-09
 
 ### Changed
 - MCP tools consolidated from 6 to 3:
-  - `kanban_create` + `kanban_update` merged into `kanban_manage` with `action` parameter (`create` | `move` | `toggle` | `update`)
+  - `kanban_create` + `kanban_update` merged into `kanban_manage` with `action` parameter (`create` | `move` | `update`)
   - `kanban_gui_start` + `kanban_gui_stop` + `kanban_gui_status` merged into `kanban_gui` with `action` parameter (`start` | `stop` | `status`)
   - `kanban_read` unchanged
+- `kanban_manage` subtask edits now use full list updates via `update`; `toggle` action removed
 
 ## [2.1.0] - 2026-07-09
 

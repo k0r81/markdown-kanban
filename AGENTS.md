@@ -6,7 +6,7 @@ This document provides build commands, testing procedures, and code style guidel
 
 ### Available Scripts
 ```bash
-# Start web GUI (opens http://localhost:5500)
+# Start web GUI (stable project port in 5510-5999, or KANBANGO_GUI_PORT)
 npm start
 # or
 node bin/kanban.js serve
@@ -14,7 +14,7 @@ node bin/kanban.js serve
 # Start web GUI on custom port
 node bin/kanban.js serve 8080
 
-# Run MCP server
+# Run MCP server (optional auto-GUI: KANBANGO_AUTO_GUI=1)
 npm run mcp
 # or
 node mcp-server.js
@@ -143,7 +143,7 @@ async function parseEpic(filePath, column) {
 
 // Callbacks
 function shortId(epicId) {
-  const match = epicId.match(/^(PI-\d+[\w.]*|BUG-\d+|CHORE-\d+)/);
+  const match = epicId.match(/^(?:[A-Z]+-)?(\d+)/);
   return match ? match[1] : epicId;
 }
 ```
@@ -387,9 +387,9 @@ const args = process.argv.slice(2);  // Skip node and script path
 const cmd = args[0];
 const param1 = args[1];
 
-// Example: node bin/kanban.js move PI-001 done
+// Example: node bin/kanban.js move 001 done
 // args[0] = "move"
-// args[1] = "PI-001"
+// args[1] = "001"
 // args[2] = "done"
 ```
 

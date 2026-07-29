@@ -13,7 +13,7 @@ function findPython() {
       if (result.status === 0) {
         return cmd;
       }
-    } catch (e) {
+    } catch {
       continue;
     }
   }

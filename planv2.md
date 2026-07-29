@@ -41,13 +41,21 @@ Prefer:
 
 ```json
 {
-  "id": "PI-014-google-calendar",
+  "id": "014",
   "title": "Google Calendar Integration",
   "column": "active",
   "epic_group": "Phase 1",
   "created": "2026-07-07",
   "description": "High-level context and implementation plan in markdown.",
   "specs": "Technical constraints, APIs, data model, edge cases.",
+  "in_scope": [
+    "OAuth connect/disconnect",
+    "Two-way event sync"
+  ],
+  "out_of_scope": [
+    "Microsoft Calendar",
+    "Mobile push notifications"
+  ],
   "acceptance_criteria": [
     "User can connect Google account",
     "Events sync in both directions",
@@ -69,6 +77,8 @@ Prefer:
 
 - `description`: the main context, why the work exists, and the implementation plan
 - `specs`: concrete technical facts, constraints, APIs, data shape, edge cases
+- `in_scope`: what this task includes (boundaries)
+- `out_of_scope`: explicit non-goals / exclusions
 - `acceptance_criteria`: what must be true for the task to count as done
 - `subtasks[].description`: local execution detail for a subtask
 - `notes`: optional freeform leftovers, references, or observations
@@ -100,7 +110,7 @@ Add support for response shaping.
 ```json
 {
   "operation": "show",
-  "task_id": "PI-014-google-calendar",
+  "task_id": "014",
   "view": "planning"
 }
 ```
@@ -108,7 +118,7 @@ Add support for response shaping.
 Suggested views:
 
 - `summary`: id, title, column, epic, created, progress counts
-- `planning`: summary + description + specs + acceptance_criteria
+- `planning`: summary + description + specs + in_scope + out_of_scope + acceptance_criteria
 - `execution`: planning + subtasks
 - `full`: everything including notes and metadata
 
@@ -117,7 +127,7 @@ Suggested views:
 ```json
 {
   "operation": "show",
-  "task_id": "PI-014-google-calendar",
+  "task_id": "014",
   "fields": ["title", "description", "acceptance_criteria"]
 }
 ```
@@ -171,7 +181,7 @@ Use a patch-like payload and let callers control the returned payload size.
 ```json
 {
   "operation": "update",
-  "task_id": "PI-014-google-calendar",
+  "task_id": "014",
   "patch": {
     "description": "Updated implementation plan...",
     "acceptance_criteria": [
@@ -243,10 +253,10 @@ Recommended shape:
 {
   "error": {
     "code": "TASK_NOT_FOUND",
-    "message": "Task PI-014-google-calendar was not found",
+    "message": "Task 014 was not found",
     "hint": "Call kanban_read with operation=list to discover valid task ids",
     "details": {
-      "task_id": "PI-014-google-calendar"
+      "task_id": "014"
     },
     "retryable": false
   }

@@ -3,6 +3,10 @@ const path = require('path');
 
 const BACKLOG = path.join(process.cwd(), 'backlog');
 const COLS = ['active', 'planned', 'icebox', 'done'];
+const GUI_PORT_FILE = '.kanbango-gui.json';
+const GUI_PORT_MIN = 5510;
+const GUI_PORT_MAX = 5999;
+const GUI_PORT_SPAN = GUI_PORT_MAX - GUI_PORT_MIN + 1;
 const STATUS_MAP = {
   active: 'in_progress',
   planned: 'planned',
@@ -20,6 +24,8 @@ const VIEW_FIELDS = {
     'progress',
     'description',
     'specs',
+    'in_scope',
+    'out_of_scope',
     'acceptance_criteria',
     'test_cases'
   ],
@@ -32,6 +38,8 @@ const VIEW_FIELDS = {
     'progress',
     'description',
     'specs',
+    'in_scope',
+    'out_of_scope',
     'acceptance_criteria',
     'test_cases',
     'subtasks'
@@ -45,12 +53,24 @@ const VIEW_FIELDS = {
     'progress',
     'description',
     'specs',
+    'in_scope',
+    'out_of_scope',
     'acceptance_criteria',
     'test_cases',
     'subtasks',
     'notes'
   ]
 };
+
+// Hard-required on create: title only (keeps GUI/CLI quick-add usable).
+// Strongly recommended for agent/planned work — missing ones yield warnings, not errors.
+const RECOMMENDED_CREATE_FIELDS = [
+  'description',
+  'specs',
+  'in_scope',
+  'out_of_scope',
+  'acceptance_criteria'
+];
 
 function createKanbanError(code, message, hint, details = {}, retryable = false, status = 400) {
   const error = new Error(message);
@@ -75,7 +95,7 @@ function normalizeString(value, fallback = '') {
 }
 
 function extractTaskNumber(taskId) {
-  const match = normalizeString(taskId).match(/^[A-Z]+-(\d+)/);
+  const match = normalizeString(taskId).match(/^(?:[A-Z]+-)?(\d+)/);
   return match ? parseInt(match[1], 10) : null;
 }
 
@@ -84,6 +104,36 @@ function normalizeStringArray(value) {
   return value
     .map((item) => String(item || '').trim())
     .filter(Boolean);
+}
+
+function isPresentCreateField(field, value) {
+  if (field === 'description' || field === 'specs' || field === 'notes') {
+    return Boolean(normalizeString(value));
+  }
+  if (
+    field === 'in_scope' ||
+    field === 'out_of_scope' ||
+    field === 'acceptance_criteria' ||
+    field === 'test_cases' ||
+    field === 'subtasks'
+  ) {
+    if (field === 'subtasks') return normalizeSubtasks(value).length > 0;
+    return normalizeStringArray(value).length > 0;
+  }
+  return value !== undefined && value !== null && value !== '';
+}
+
+function missingRecommendedCreateFields(payload = {}) {
+  return RECOMMENDED_CREATE_FIELDS.filter((field) => !isPresentCreateField(field, payload[field]));
+}
+
+function createFieldWarnings(payload = {}) {
+  const missing = missingRecommendedCreateFields(payload);
+  if (missing.length === 0) return [];
+  return [
+    `Strongly recommended fields missing: ${missing.join(', ')}. ` +
+      'Fill them on create (or via update) so scope and done-criteria are explicit.'
+  ];
 }
 
 function normalizeSubtasks(value) {
@@ -96,15 +146,23 @@ function normalizeSubtasks(value) {
   })).filter((subtask) => subtask.text);
 }
 
-function withLegacyTaskAlias(task) {
+function normalizeEvidence(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    diff: normalizeString(item && item.diff),
+    test_command: normalizeString(item && item.test_command),
+    stdout: normalizeString(item && item.stdout),
+    stderr: normalizeString(item && item.stderr),
+    exit_code: Number.isInteger(item && item.exit_code) ? item.exit_code : null,
+    created: normalizeString(item && item.created) || todayIso()
+  }));
+}
+
+function normalizePlan(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return {
-    ...task,
-    tasks: task.subtasks.map((subtask) => ({
-      id: subtask.id,
-      text: subtask.text,
-      done: subtask.done,
-      description: subtask.description
-    }))
+    runner: value.runner && typeof value.runner === 'object' ? value.runner : null,
+    status: ['active', 'done'].includes(value.status) ? value.status : 'active'
   };
 }
 
@@ -118,14 +176,18 @@ function normalizeTask(task) {
     created: normalizeString(task.created) || todayIso(),
     description: normalizeString(task.description),
     specs: normalizeString(task.specs),
+    in_scope: normalizeStringArray(task.in_scope),
+    out_of_scope: normalizeStringArray(task.out_of_scope),
     acceptance_criteria: normalizeStringArray(task.acceptance_criteria),
     test_cases: normalizeStringArray(task.test_cases),
-    subtasks: normalizeSubtasks(task.subtasks || task.tasks),
+    subtasks: normalizeSubtasks(task.subtasks),
     notes: normalizeString(task.notes),
+    plan: normalizePlan(task.plan),
+    evidence: normalizeEvidence(task.evidence),
     task_number: extractTaskNumber(id)
   };
 
-  return withLegacyTaskAlias(normalized);
+  return normalized;
 }
 
 function serializeTask(task) {
@@ -138,10 +200,14 @@ function serializeTask(task) {
     created: normalized.created,
     description: normalized.description,
     specs: normalized.specs,
+    in_scope: normalized.in_scope,
+    out_of_scope: normalized.out_of_scope,
     acceptance_criteria: normalized.acceptance_criteria,
     test_cases: normalized.test_cases,
     subtasks: normalized.subtasks,
     notes: normalized.notes,
+    plan: normalized.plan,
+    evidence: normalized.evidence,
     task_number: normalized.task_number
   };
 }
@@ -158,10 +224,6 @@ function pickFields(task, fieldNames) {
   for (const field of fieldNames) {
     if (field === 'progress') {
       picked.progress = getProgress(task);
-      continue;
-    }
-    if (field === 'tasks') {
-      picked.tasks = task.tasks;
       continue;
     }
     if (field in task) {
@@ -239,6 +301,8 @@ async function parseMarkdownTask(filePath, column) {
     created: createdMatch ? createdMatch[1].trim() : todayIso(),
     description: extractSection(text, ['Opis', 'Description']),
     specs: extractSection(text, ['Specs', 'Specyfikacja']),
+    in_scope: parseListSection(extractSection(text, ['In Scope', 'W Zakresie'])),
+    out_of_scope: parseListSection(extractSection(text, ['Out of Scope', 'Poza Zakresem'])),
     acceptance_criteria: parseListSection(extractSection(text, ['Acceptance Criteria', 'Kryteria Akceptacji'])),
     test_cases: parseListSection(extractSection(text, ['Test Cases', 'Przypadki Testowe'])),
     subtasks,
@@ -319,7 +383,7 @@ async function findFile(epicId) {
       const candidates = files
         .filter((file) => (file.endsWith('.json') || file.endsWith('.md'))
           && path.basename(file, path.extname(file)) === epicId)
-        .sort((left, right) => (left.endsWith('.json') ? -1 : 1));
+        .sort((left, _right) => (left.endsWith('.json') ? -1 : 1));
       if (candidates[0]) {
         return path.join(colDir, candidates[0]);
       }
@@ -361,8 +425,8 @@ async function resolveTaskId(input) {
     const colDir = path.join(BACKLOG, col);
     try {
       const files = await fs.readdir(colDir);
-      const rawPattern = new RegExp(`^[A-Z]+-${String(num)}-`);
-      const paddedPattern = new RegExp(`^[A-Z]+-${String(num).padStart(3, '0')}-`);
+      const rawPattern = new RegExp(`^(?:[A-Z]+-)?${String(num)}(?:-|$)`);
+      const paddedPattern = new RegExp(`^(?:[A-Z]+-)?${String(num).padStart(3, '0')}(?:-|$)`);
       const match = files.find((file) => {
         const base = path.basename(file, path.extname(file));
         return rawPattern.test(base) || paddedPattern.test(base + '-');
@@ -440,7 +504,7 @@ async function migrateAll(options = {}) {
   return { migrated, errors };
 }
 
-async function nextPiNumber() {
+async function nextTaskNumber() {
   const ids = [];
 
   for (const col of COLS) {
@@ -448,7 +512,7 @@ async function nextPiNumber() {
     try {
       const files = await fs.readdir(colDir);
       for (const file of files) {
-        const match = file.match(/^PI-(\d+)/);
+        const match = file.match(/^(?:[A-Z]+-)?(\d+)/);
         if (match) ids.push(parseInt(match[1], 10));
       }
     } catch (error) {
@@ -499,24 +563,23 @@ async function doCreate(title, column = 'planned', epicGroup = '—', extra = {}
 
   validateColumn(column, 'col');
 
-  const nextId = await nextPiNumber();
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .substring(0, 25);
+  const nextId = await nextTaskNumber();
   const task = normalizeTask({
-    id: `PI-${String(nextId).padStart(3, '0')}-${slug || 'task'}`,
+    id: String(nextId).padStart(3, '0'),
     title,
     column,
     epic_group: epicGroup || '—',
     created: todayIso(),
     description: extra.description,
     specs: extra.specs,
+    in_scope: extra.in_scope,
+    out_of_scope: extra.out_of_scope,
     acceptance_criteria: extra.acceptance_criteria,
     test_cases: extra.test_cases,
     subtasks: extra.subtasks,
-    notes: extra.notes
+    notes: extra.notes,
+    plan: extra.plan,
+    evidence: extra.evidence
   });
 
   return writeTask(task);
@@ -562,6 +625,32 @@ async function updateTask(taskId, patch) {
   if (patch.epic_group !== undefined) next.epic_group = normalizeString(patch.epic_group, '—') || '—';
   if (patch.description !== undefined) next.description = normalizeString(patch.description);
   if (patch.specs !== undefined) next.specs = normalizeString(patch.specs);
+  if (patch.in_scope !== undefined) {
+    if (!Array.isArray(patch.in_scope)) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'in_scope must be an array of strings',
+        'Send in_scope as an array',
+        { field: 'in_scope' },
+        false,
+        400
+      );
+    }
+    next.in_scope = patch.in_scope;
+  }
+  if (patch.out_of_scope !== undefined) {
+    if (!Array.isArray(patch.out_of_scope)) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'out_of_scope must be an array of strings',
+        'Send out_of_scope as an array',
+        { field: 'out_of_scope' },
+        false,
+        400
+      );
+    }
+    next.out_of_scope = patch.out_of_scope;
+  }
   if (patch.acceptance_criteria !== undefined) {
     if (!Array.isArray(patch.acceptance_criteria)) {
       throw createKanbanError(
@@ -588,9 +677,8 @@ async function updateTask(taskId, patch) {
     }
     next.test_cases = patch.test_cases;
   }
-  if (patch.subtasks !== undefined || patch.tasks !== undefined) {
-    const subtasks = patch.subtasks !== undefined ? patch.subtasks : patch.tasks;
-    if (!Array.isArray(subtasks)) {
+  if (patch.subtasks !== undefined) {
+    if (!Array.isArray(patch.subtasks)) {
       throw createKanbanError(
         'VALIDATION_ERROR',
         'subtasks must be an array',
@@ -600,9 +688,23 @@ async function updateTask(taskId, patch) {
         400
       );
     }
-    next.subtasks = subtasks;
+    next.subtasks = patch.subtasks;
   }
   if (patch.notes !== undefined) next.notes = normalizeString(patch.notes);
+  if (patch.plan !== undefined) next.plan = patch.plan;
+  if (patch.evidence !== undefined) {
+    if (!Array.isArray(patch.evidence)) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'evidence must be an array',
+        'Send evidence as an array of evidence objects',
+        { field: 'evidence' },
+        false,
+        400
+      );
+    }
+    next.evidence = patch.evidence;
+  }
 
   return writeTask(next, previousFilePath);
 }
@@ -662,6 +764,118 @@ async function doUpdate(epicId, newTitle, newTasks) {
   }
 }
 
+function guiPortFilePath() {
+  return path.join(BACKLOG, GUI_PORT_FILE);
+}
+
+function hashCwdToPort(cwd = process.cwd()) {
+  let hash = 0;
+  const input = String(cwd);
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return GUI_PORT_MIN + (Math.abs(hash) % GUI_PORT_SPAN);
+}
+
+function normalizeGuiPort(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
+    return null;
+  }
+  return parsed;
+}
+
+function resolvePreferredGuiPort(explicitPort) {
+  if (explicitPort !== undefined && explicitPort !== null && explicitPort !== '') {
+    const fromArg = normalizeGuiPort(explicitPort);
+    if (fromArg) return fromArg;
+  }
+
+  const fromEnv = normalizeGuiPort(process.env.KANBANGO_GUI_PORT);
+  if (fromEnv) return fromEnv;
+
+  return hashCwdToPort(process.cwd());
+}
+
+function isPidAlive(pid) {
+  const n = Number.parseInt(pid, 10);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  try {
+    process.kill(n, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeGuiPortFile({ port, pid = process.pid } = {}) {
+  const normalizedPort = normalizeGuiPort(port);
+  if (!normalizedPort) {
+    throw createKanbanError(
+      'VALIDATION_ERROR',
+      'Invalid GUI port',
+      'Use an integer between 1 and 65535',
+      { port },
+      false,
+      400
+    );
+  }
+
+  await ensureBacklogDir();
+  const data = {
+    port: normalizedPort,
+    pid,
+    url: `http://localhost:${normalizedPort}`,
+    cwd: process.cwd(),
+    started_at: new Date().toISOString()
+  };
+  await fs.writeFile(guiPortFilePath(), JSON.stringify(data, null, 2), 'utf-8');
+  return data;
+}
+
+async function readGuiPortFile() {
+  try {
+    const raw = await fs.readFile(guiPortFilePath(), 'utf-8');
+    const data = JSON.parse(raw);
+    if (!data || !normalizeGuiPort(data.port)) return null;
+    return data;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    return null;
+  }
+}
+
+async function clearGuiPortFile({ pid, force = false } = {}) {
+  const info = await readGuiPortFile();
+  if (!info) return false;
+  if (!force && pid !== undefined && info.pid !== pid) return false;
+  if (!force && pid === undefined && info.pid !== process.pid) return false;
+
+  try {
+    await fs.unlink(guiPortFilePath());
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function discoverRunningGui() {
+  const info = await readGuiPortFile();
+  if (!info || !isPidAlive(info.pid)) {
+    if (info) await clearGuiPortFile({ force: true });
+    return null;
+  }
+  return {
+    status: 'running',
+    port: info.port,
+    pid: info.pid,
+    url: info.url || `http://localhost:${info.port}`,
+    cwd: info.cwd,
+    started_at: info.started_at
+  };
+}
+
 module.exports = {
   ensureBacklogDir,
   parseEpic,
@@ -676,9 +890,23 @@ module.exports = {
   doUpdate,
   doCreate,
   createKanbanError,
+  createFieldWarnings,
+  missingRecommendedCreateFields,
   getProgress,
   resolveTaskId,
+  hashCwdToPort,
+  normalizeGuiPort,
+  resolvePreferredGuiPort,
+  isPidAlive,
+  writeGuiPortFile,
+  readGuiPortFile,
+  clearGuiPortFile,
+  discoverRunningGui,
+  guiPortFilePath,
   COLS,
   STATUS_MAP,
-  VIEW_FIELDS
+  VIEW_FIELDS,
+  RECOMMENDED_CREATE_FIELDS,
+  GUI_PORT_MIN,
+  GUI_PORT_MAX
 };
