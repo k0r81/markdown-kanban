@@ -10,8 +10,10 @@
 
 const kanban = require('./kanban.js');
 const plan = require('./plan.js');
+const guiRegistry = require('./gui-registry.js');
 
 module.exports = {
   kanban,
   plan,
+  guiRegistry,
 };

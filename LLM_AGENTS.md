@@ -232,6 +232,11 @@ Patch-update task fields:
 
 Control the web GUI server: start, stop, or check status.
 
+**Ownership (important):**
+- `stop` only sends SIGTERM to a GUI **spawned by this MCP process** (`owned: true`).
+- If the GUI was started elsewhere (CLI `kanban serve`, another MCP), `stop` returns `external_running` and does **not** kill that PID.
+- `status` distinguishes `running` (owned), `external_running` (discovered via port file), and `not_running`.
+
 **Port resolution (start):**
 1. Explicit `port` argument, if provided
 2. Else `KANBANGO_GUI_PORT` env
@@ -242,9 +247,9 @@ If the preferred port is busy, the server picks the next free port. Always trust
 **Auto-start with MCP:** set `KANBANGO_AUTO_GUI=1` in the MCP server env. GUI starts when MCP starts; use `status` to read the URL.
 
 **Actions:**
-- `start` - Launch the GUI server
-- `stop` - Kill the GUI server
-- `status` - Check if the GUI is running (reads live process or port file)
+- `start` - Launch the GUI server (or report already_running owned/external)
+- `stop` - Stop only MCP-owned GUI
+- `status` - Check GUI state
 
 **Parameters:**
 ```json
@@ -289,27 +294,53 @@ Check status:
 ```json
 {
   "status": "started",
+  "owned": true,
   "port": 5623,
   "pid": 12345,
   "url": "http://localhost:5623"
 }
 ```
 
-**Response (stop):**
+**Response (stop - owned):**
 ```json
 {
   "status": "stopping",
+  "owned": true,
   "port": 5623,
   "pid": 12345
 }
 ```
 
-**Response (status - running):**
+**Response (stop - external refused):**
+```json
+{
+  "status": "external_running",
+  "owned": false,
+  "port": 5623,
+  "pid": 12345,
+  "url": "http://localhost:5623",
+  "hint": "GUI was not started by this MCP process; stop refused."
+}
+```
+
+**Response (status - running owned):**
 ```json
 {
   "status": "running",
+  "owned": true,
   "port": 5623,
   "pid": 12345,
+  "url": "http://localhost:5623"
+}
+```
+
+**Response (status - external):**
+```json
+{
+  "status": "external_running",
+  "owned": false,
+  "port": 5623,
+  "pid": 99999,
   "url": "http://localhost:5623"
 }
 ```

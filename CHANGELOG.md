@@ -5,6 +5,25 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-07-29
+
+### Breaking
+- New task IDs are zero-padded numeric strings (`001`), not `PI-001-slug`
+- MCP/CLI `toggle` removed; update the full `subtasks` list via `update`
+- Legacy task field alias `tasks` removed; use `subtasks` only
+- `kanban_gui` `stop` only stops a GUI **spawned by the current MCP process**. An external GUI returns `status: "external_running"` and is **not** sent SIGTERM (PID-reuse safety)
+- `kanban_gui` `status` may return `running` (owned), `external_running` (discovered), or `not_running`
+
+### Added
+- Accepted-plan workflow: `plan.js` + CLI `kanban plan <action> --json` + MCP `plan_*` actions on `kanban_manage`
+- `gui-registry.js` — GUI port file, preferred port, discover helpers (extracted from `kanban.js`)
+- Regression tests for plan workflow and GUI process ownership
+
+### Changed
+- Create field policy: only `title` is hard-required; `description`, `specs`, `in_scope`, `out_of_scope`, and `acceptance_criteria` are strongly recommended
+- MCP `kanban_manage` create/plan_create returns `warnings` + `missing_recommended` when recommended fields are omitted (still succeeds)
+- MCP tool descriptions and LLM agent docs push agents to always fill planning boundaries
+
 ## [2.5.0] - 2026-07-27
 
 ### Changed

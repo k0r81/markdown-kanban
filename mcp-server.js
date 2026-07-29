@@ -8,6 +8,7 @@ const path = require('path');
 const pkg = require('./package.json');
 const kanban = require('./kanban.js');
 const plan = require('./plan.js');
+const guiRegistry = require('./gui-registry.js');
 
 const COLS = kanban.COLS;
 const READ_VIEWS = Object.keys(kanban.VIEW_FIELDS);
@@ -17,7 +18,11 @@ let guiProcess = null;
 let guiPort = null;
 
 function normalizePort(value) {
-  return kanban.normalizeGuiPort(value);
+  return guiRegistry.normalizeGuiPort(value);
+}
+
+function ownsGuiProcess() {
+  return Boolean(guiProcess && guiProcess.exitCode === null);
 }
 
 function sleep(ms) {
@@ -41,7 +46,7 @@ async function waitForGuiReady(pid, timeoutMs = GUI_READY_TIMEOUT_MS) {
       );
     }
 
-    const info = await kanban.discoverRunningGui();
+    const info = await guiRegistry.discoverRunningGui();
     if (info && info.pid === pid) return info;
 
     await sleep(GUI_READY_POLL_MS);
@@ -145,27 +150,28 @@ async function startGuiServer(port) {
     throw invalidRequest('Invalid port', 'Use an integer between 1 and 65535', { port });
   }
 
-  if (guiProcess && guiProcess.exitCode === null && guiPort) {
+  if (ownsGuiProcess() && guiPort) {
     return {
       status: 'already_running',
+      owned: true,
       port: guiPort,
       pid: guiProcess.pid,
       url: `http://localhost:${guiPort}`
     };
   }
 
-  const existing = await kanban.discoverRunningGui();
+  const existing = await guiRegistry.discoverRunningGui();
   if (existing) {
-    guiPort = existing.port;
     return {
       status: 'already_running',
+      owned: false,
       port: existing.port,
       pid: existing.pid,
       url: existing.url
     };
   }
 
-  const desiredPort = kanban.resolvePreferredGuiPort(port);
+  const desiredPort = guiRegistry.resolvePreferredGuiPort(port);
   await kanban.ensureBacklogDir();
 
   const scriptPath = path.join(__dirname, 'bin', 'kanban.js');
@@ -189,6 +195,7 @@ async function startGuiServer(port) {
 
   return {
     status: 'started',
+    owned: true,
     port: ready.port,
     pid: ready.pid,
     url: ready.url
@@ -196,61 +203,70 @@ async function startGuiServer(port) {
 }
 
 async function stopGuiServer() {
-  const trackedRunning = guiProcess && guiProcess.exitCode === null;
-  const discovered = trackedRunning ? null : await kanban.discoverRunningGui();
+  if (ownsGuiProcess()) {
+    const port = guiPort;
+    const pid = guiProcess.pid;
+    guiProcess.kill();
 
-  if (!trackedRunning && !discovered) {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      const still = await guiRegistry.discoverRunningGui();
+      if (!still || still.pid !== pid) break;
+      await sleep(50);
+    }
+
+    await guiRegistry.clearGuiPortFile({ force: true });
     guiProcess = null;
     guiPort = null;
-    return { status: 'not_running' };
+    return { status: 'stopping', owned: true, port, pid };
   }
 
-  const port = trackedRunning ? guiPort : discovered.port;
-  const pid = trackedRunning ? guiProcess.pid : discovered.pid;
-
-  if (trackedRunning) {
-    guiProcess.kill();
-  } else if (pid) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // process may already be gone
-    }
-  }
-
-  const deadline = Date.now() + 2000;
-  while (Date.now() < deadline) {
-    const still = await kanban.discoverRunningGui();
-    if (!still || still.pid !== pid) break;
-    await sleep(50);
-  }
-
-  await kanban.clearGuiPortFile({ force: true });
   guiProcess = null;
   guiPort = null;
 
-  return { status: 'stopping', port, pid };
+  const discovered = await guiRegistry.discoverRunningGui();
+  if (!discovered) {
+    return { status: 'not_running' };
+  }
+
+  return {
+    status: 'external_running',
+    owned: false,
+    port: discovered.port,
+    pid: discovered.pid,
+    url: discovered.url,
+    hint: 'GUI was not started by this MCP process; stop refused. Stop it from the owning terminal or kill that PID manually.'
+  };
 }
 
 async function guiStatus() {
-  if (guiProcess && guiProcess.exitCode === null && guiPort) {
+  if (ownsGuiProcess() && guiPort) {
     return {
       status: 'running',
+      owned: true,
       port: guiPort,
       pid: guiProcess.pid,
       url: `http://localhost:${guiPort}`
     };
   }
 
-  const discovered = await kanban.discoverRunningGui();
+  guiProcess = null;
+  guiPort = null;
+
+  const discovered = await guiRegistry.discoverRunningGui();
   if (!discovered) {
-    guiProcess = null;
-    guiPort = null;
     return { status: 'not_running' };
   }
 
-  guiPort = discovered.port;
-  return discovered;
+  return {
+    status: 'external_running',
+    owned: false,
+    port: discovered.port,
+    pid: discovered.pid,
+    url: discovered.url,
+    cwd: discovered.cwd,
+    started_at: discovered.started_at
+  };
 }
 
 const server = new Server(
@@ -436,14 +452,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'kanban_gui',
-        description: 'Control the web GUI server: start, stop, or check status.',
+        description: 'Control the web GUI server: start, stop, or check status. stop only kills a GUI spawned by this MCP process; external GUI returns status external_running without SIGTERM.',
         inputSchema: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
               enum: ['start', 'stop', 'status'],
-              description: "Action to perform: 'start' launches GUI, 'stop' kills it, 'status' checks if running"
+              description: "Action: 'start' launches GUI, 'stop' stops only MCP-owned GUI, 'status' reports running | external_running | not_running"
             },
             port: {
               type: 'integer',
@@ -656,9 +672,10 @@ async function maybeAutoStartGui() {
 function installGuiShutdownHooks() {
   let shuttingDown = false;
 
-  async function shutdown() {
+  async function shutdownOwnedGui() {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (!ownsGuiProcess()) return;
     try {
       await stopGuiServer();
     } catch {
@@ -667,7 +684,7 @@ function installGuiShutdownHooks() {
   }
 
   process.once('exit', () => {
-    if (guiProcess && guiProcess.exitCode === null) {
+    if (ownsGuiProcess()) {
       try {
         guiProcess.kill();
       } catch {
@@ -676,10 +693,10 @@ function installGuiShutdownHooks() {
     }
   });
   process.once('SIGINT', () => {
-    shutdown().finally(() => process.exit(0));
+    shutdownOwnedGui().finally(() => process.exit(0));
   });
   process.once('SIGTERM', () => {
-    shutdown().finally(() => process.exit(0));
+    shutdownOwnedGui().finally(() => process.exit(0));
   });
 }
 
@@ -699,7 +716,7 @@ module.exports = {
   startGuiServer,
   stopGuiServer,
   guiStatus,
-  resolvePreferredGuiPort: kanban.resolvePreferredGuiPort,
+  resolvePreferredGuiPort: guiRegistry.resolvePreferredGuiPort,
   server,
   main
 };

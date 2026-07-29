@@ -131,7 +131,7 @@ Once connected, your agent gets access to these tools:
 |------|-------------|
 | `kanban_read` | List tasks, filter by column/epic, show details |
 | `kanban_manage` | Create, move, patch-update tasks |
-| `kanban_gui` | Start, stop, or check web GUI status (returns the real URL/port) |
+| `kanban_gui` | Start / status / stop web GUI (stop only kills GUI started by this MCP process) |
 
 Your agent stays in sync with your real board — every change is persisted as JSON files.
 
@@ -146,6 +146,7 @@ Your agent stays in sync with your real board — every change is persisted as J
 | `kanban add <TITLE>` | Add a new task |
 | `kanban move <ID> <COL>` | Move task |
 | `kanban mcp-init` | Generate MCP config files |
+| `kanban plan <action> --json '{...}'` | Accepted-plan workflow (create/advance/evidence/done/status) |
 
 ## Web GUI
 

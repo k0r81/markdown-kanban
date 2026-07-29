@@ -2,6 +2,7 @@
 
 const kanban = require('../kanban.js');
 const plan = require('../plan.js');
+const guiRegistry = require('../gui-registry.js');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -356,11 +357,11 @@ async function serveWeb(port) {
   }
 
   const actualPort = server.address().port;
-  const portInfo = await kanban.writeGuiPortFile({ port: actualPort, pid: process.pid });
+  const portInfo = await guiRegistry.writeGuiPortFile({ port: actualPort, pid: process.pid });
 
   async function cleanupGuiPortFile() {
     try {
-      await kanban.clearGuiPortFile({ pid: process.pid });
+      await guiRegistry.clearGuiPortFile({ pid: process.pid });
     } catch {
       // best-effort cleanup
     }
@@ -458,7 +459,7 @@ async function main() {
   const cmd = args[0];
 
   if (!cmd || cmd === 'serve') {
-    const port = kanban.resolvePreferredGuiPort(args[1]);
+    const port = guiRegistry.resolvePreferredGuiPort(args[1]);
     await serveWeb(port);
   } else if (cmd === 'init') {
     await cliInit();
