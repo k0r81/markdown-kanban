@@ -1,6 +1,12 @@
 # MCP Server Guide for LLM Agents
 
-Complete guide for integrating kanbango MCP server into LLM agents and AI assistants.
+Human-oriented setup guide. **Agents do not load this file automatically.**
+
+Canonical usage rules live in code (`agent-playbook.js`) and are injected into MCP
+`tools/list` descriptions. After install, the agent only needs the MCP server —
+not this markdown.
+
+Optional refresh in-session: `kanban_read` with `operation: "help"`.
 
 ## Quick Integration
 
@@ -63,11 +69,12 @@ Read tasks from kanban board. Can list all tasks, filter by column/epic, or get 
 **Operations:**
 - `list` - Get all tasks (with optional filters)
 - `show` - Get specific task details
+- `help` - Return token playbook from `agent-playbook.js` (no board I/O)
 
 **Parameters:**
 ```json
 {
-  "operation": "list",  // "list" or "show"
+  "operation": "list",  // "list" | "show" | "help"
   "task_id": "014",  // Required for "show"
   "col": "planned",  // Optional: "active" | "planned" | "icebox" | "done"
   "epic": "Phase 1"  // Optional: filter by epic group
@@ -457,17 +464,34 @@ Check status:
 
 ---
 
-## Best Practices for LLM Agents
+## Token-efficient playbook (source of truth)
 
-1. **Always use `kanban_read` first** - Discover existing tasks before creating new ones
-2. **Numeric task lookup** - Task IDs are zero-padded numbers (e.g. `"035"`). Unpadded numbers such as `"35"` also work in any `task_id` parameter.
-3. **Use `col` filter** - Narrow down to relevant column when listing
-4. **Use `epic` grouping** - Organize tasks by features/phases
-5. **Create with planning fields** - Always include description, specs, in_scope, out_of_scope, acceptance_criteria; treat `warnings`/`missing_recommended` as a signal to fill gaps
-6. **Work through subtasks** - Check/uncheck them via update as you complete them
-7. **Move tasks through workflow** - planned → active → done progression
-8. **Use `show` operation** - Get full task details including subtasks
-9. **Handle task IDs** - Always use the full task ID returned from create/show
+**Edit `agent-playbook.js` only.** MCP tool descriptions and `operation=help` are built from it.
+
+At runtime agents already receive the rules via tool descriptions. Humans can also call:
+
+```json
+{ "operation": "help" }
+```
+
+on `kanban_read` (no board I/O).
+
+### Drop-in for project `AGENTS.md` (optional)
+
+Same bullets as `DROP_IN_RULE` in `agent-playbook.js` — copy if you want them outside MCP:
+
+```text
+Kanbango MCP — token rules:
+- list: col filter, view=summary; keep task_ids; no full-board re-list after writes
+- show: view=execution while coding; full only if needed
+- create once with description,specs,in_scope,out_of_scope,acceptance_criteria
+- move/update: return=none; subtasks=full array replace
+- non-trivial: plan_create → plan_advance → plan_evidence (real tests, truncated logs) → plan_done
+- gui: status before start; stop only owned; external_running = do not kill
+```
+
+### Columns
+`planned` → `active` (few at a time) → `done`. Use `icebox` for parked work.
 
 ---
 

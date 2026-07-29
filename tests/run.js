@@ -19,3 +19,4 @@ runNode(path.join('tests', 'read-views.test.js'), [], 'Read views test');
 runNode(path.join('tests', 'mcp-server.test.js'), [], 'MCP server test');
 runNode(path.join('tests', 'gui-port.test.js'), [], 'GUI port test');
 runNode(path.join('tests', 'plan-workflow.test.js'), [], 'Plan workflow test');
+runNode(path.join('tests', 'agent-playbook.test.js'), [], 'Agent playbook test');

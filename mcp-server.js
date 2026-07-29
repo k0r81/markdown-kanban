@@ -9,6 +9,7 @@ const pkg = require('./package.json');
 const kanban = require('./kanban.js');
 const plan = require('./plan.js');
 const guiRegistry = require('./gui-registry.js');
+const playbook = require('./agent-playbook.js');
 
 const COLS = kanban.COLS;
 const READ_VIEWS = Object.keys(kanban.VIEW_FIELDS);
@@ -286,37 +287,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'kanban_read',
-        description: 'Read tasks from the board. operation=list returns multiple tasks with optional col/epic filters. operation=show requires task_id. Use view for preset payload sizes or fields for exact field selection.',
+        description: playbook.TOOL_DESCRIPTIONS.kanban_read,
         inputSchema: {
           type: 'object',
           properties: {
             operation: {
               type: 'string',
-              enum: ['list', 'show'],
-              description: "Operation to perform: 'list' for all tasks, 'show' for a specific task",
+              enum: ['list', 'show', 'help'],
+              description: 'list=scan board; show=one task (needs task_id); help=token playbook (no board I/O)',
               default: 'list'
             },
             task_id: {
               type: 'string',
-                description: "Task ID (optional for 'list', required for 'show'). Use a numeric ID like '014' or just a number like '14'."
+              description: "Required for show. Numeric id: '014' or '14'."
             },
             col: {
               type: 'string',
               enum: COLS,
-              description: 'Optional column filter for list'
+              description: 'Filter list by column (saves tokens — prefer this)'
             },
             epic: {
               type: 'string',
-              description: 'Optional epic group filter for list'
+              description: 'Filter list by epic group'
             },
             view: {
               type: 'string',
               enum: READ_VIEWS,
-              description: 'Preset response view. Defaults to summary.'
+              description: 'summary=board scan (default); planning=scope/AC; execution=+subtasks; full=everything. Prefer smallest that works.'
             },
             fields: {
               type: 'array',
-              description: 'Explicit fields to return. When provided, fields override view.',
+              description: 'Exact fields only (overrides view). Use when you need 1–2 fields.',
               items: { type: 'string' }
             }
           },
@@ -325,61 +326,61 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'kanban_manage',
-        description: 'Mutate tasks and accepted plans. Required by action: create/plan_create -> title only; move -> task_id + column; update -> task_id + patch/shortcuts; plan_advance/plan_done/plan_status -> task_id; plan_evidence -> task_id + diff + test_command + stdout + stderr + exit_code. Strongly recommended on create/plan_create: description, specs, in_scope, out_of_scope, acceptance_criteria (missing fields return warnings, not errors). Example: {"action":"create","title":"Ship Docker image","description":"...","specs":"...","in_scope":["CLI"],"out_of_scope":["GUI"],"acceptance_criteria":["npm test passes"],"col":"planned","epic":"Release"}.',
+        description: playbook.TOOL_DESCRIPTIONS.kanban_manage,
         inputSchema: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
-               enum: ['create', 'move', 'update', 'plan_create', 'plan_advance', 'plan_evidence', 'plan_done', 'plan_status'],
-               description: 'Create, move, update, or operate the accepted-plan workflow'
+              enum: ['create', 'move', 'update', 'plan_create', 'plan_advance', 'plan_evidence', 'plan_done', 'plan_status'],
+              description: 'create|move|update daily; plan_* only for accepted multi-step work with tests'
             },
             title: {
               type: 'string',
-              description: "Non-empty title. Required for 'create' and 'plan_create'."
+              description: 'Required for create and plan_create'
             },
             col: {
               type: 'string',
               enum: COLS,
               default: 'planned',
-              description: "Column for 'create' or shortcut patch field for 'update' (default: 'planned')."
+              description: 'create column, or update shortcut for column'
             },
             epic: {
               type: 'string',
               default: '—',
-              description: "Epic group for 'create', 'update', or 'plan_create' (optional)."
+              description: 'Epic group (create/update/plan_create)'
             },
             description: {
               type: 'string',
-              description: "Strongly recommended. High-level context/why for 'create', 'update', or 'plan_create'."
+              description: 'Why/context (recommended on create)'
             },
             specs: {
               type: 'string',
-              description: "Strongly recommended. Technical constraints, APIs, and edge cases for 'create', 'update', or 'plan_create'."
+              description: 'Technical constraints (recommended on create)'
             },
             in_scope: {
               type: 'array',
-              description: "Strongly recommended. What this task includes (boundaries) for 'create', 'update', or 'plan_create'.",
+              description: 'In-scope bullets (recommended on create)',
               items: { type: 'string' }
             },
             out_of_scope: {
               type: 'array',
-              description: "Strongly recommended. Explicit non-goals / exclusions for 'create', 'update', or 'plan_create'.",
+              description: 'Out-of-scope bullets (recommended on create)',
               items: { type: 'string' }
             },
             acceptance_criteria: {
               type: 'array',
-              description: "Strongly recommended. Completion requirements for 'create', 'update', or 'plan_create'.",
+              description: 'Done criteria (recommended on create)',
               items: { type: 'string' }
             },
             test_cases: {
               type: 'array',
-              description: "Recommended. Verification scenarios for 'create', 'update', or 'plan_create'.",
+              description: 'Verification scenarios',
               items: { type: 'string' }
             },
             subtasks: {
               type: 'array',
-              description: "Optional subtask list for 'create', 'update', or internally generated by 'plan_create'.",
+              description: 'Full subtask list replace on update (send complete array, not a single toggle)',
               items: {
                 type: 'object',
                 properties: {
@@ -392,58 +393,58 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             notes: {
               type: 'string',
-              description: "Optional freeform notes for 'create', 'update', or 'plan_create'."
+              description: 'Freeform notes'
             },
             task_id: {
               type: 'string',
-                description: "Task ID required for 'move', 'update', and all plan_* actions except 'plan_create'. Use '014' or '14'."
+              description: "Required for move/update/plan_* except plan_create. '014' or '14'."
             },
             column: {
               type: 'string',
               enum: COLS,
-              description: "Target column required for 'move'."
+              description: 'Target column for move (not col)'
             },
             patch: {
               type: 'object',
-              description: "Patch payload for 'update'. Use this for bulk field changes; top-level shortcuts are merged into the patch."
+              description: 'Bulk update object; merged with top-level field shortcuts'
             },
             return: {
               type: 'string',
               enum: ['none', 'summary', 'full'],
-              description: "Response shape for 'move' and 'update'. Defaults to summary. 'create' returns the full created task."
+              description: 'move/update response size. Prefer none. Default summary. create always returns full task once.'
             },
             index: {
               type: 'integer',
-              description: "Zero-based plan subtask index for 'plan_advance'. Defaults to the first incomplete step when omitted."
+              description: 'plan_advance: subtask index; omit = first incomplete'
             },
             steps: {
               type: 'array',
               items: { type: 'string' },
-              description: "Implementation steps inserted between the default plan workflow steps for 'plan_create'."
+              description: 'plan_create: implementation steps between red/green test steps'
             },
             project_root: {
               type: 'string',
-              description: "Project root used for test runner detection in 'plan_create'. Defaults to the MCP server working directory."
+              description: 'plan_create: root for test-runner detect (default cwd)'
             },
             diff: {
               type: 'string',
-              description: "Required for 'plan_evidence'. Include the relevant code diff or summary."
+              description: 'plan_evidence: short diff or summary (not whole repo)'
             },
             test_command: {
               type: 'string',
-              description: "Required for 'plan_evidence'. The exact verification command that was run."
+              description: 'plan_evidence: exact command run'
             },
             stdout: {
               type: 'string',
-              description: "Required for 'plan_evidence'. Captured standard output from the verification command."
+              description: 'plan_evidence: test stdout (truncate to last ~2KB if huge)'
             },
             stderr: {
               type: 'string',
-              description: "Required for 'plan_evidence'. Captured standard error from the verification command."
+              description: 'plan_evidence: test stderr (truncate if huge)'
             },
             exit_code: {
               type: 'integer',
-              description: "Required for 'plan_evidence'. Integer process exit code from the verification command."
+              description: 'plan_evidence: process exit code'
             }
           },
           required: ['action'],
@@ -452,18 +453,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'kanban_gui',
-        description: 'Control the web GUI server: start, stop, or check status. stop only kills a GUI spawned by this MCP process; external GUI returns status external_running without SIGTERM.',
+        description: playbook.TOOL_DESCRIPTIONS.kanban_gui,
         inputSchema: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
               enum: ['start', 'stop', 'status'],
-              description: "Action: 'start' launches GUI, 'stop' stops only MCP-owned GUI, 'status' reports running | external_running | not_running"
+              description: 'start | stop (owned only) | status'
             },
             port: {
               type: 'integer',
-              description: "Port for the GUI server (only for 'start'). Defaults to KANBANGO_GUI_PORT or a stable hash of the project cwd (5510-5999)."
+              description: 'Optional start port; else KANBANGO_GUI_PORT or stable 5510-5999'
             }
           },
           required: ['action'],
@@ -483,6 +484,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case 'kanban_read': {
         const operation = args.operation || 'list';
+
+        if (operation === 'help') {
+          result = playbook.playbookHelpPayload();
+          break;
+        }
+
         const readOptions = normalizeReadOptions(args, 'summary');
 
         if (operation === 'list') {
@@ -508,7 +515,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } else {
           throw invalidRequest(
             `Unknown operation: ${operation}`,
-            'Use one of: list, show',
+            'Use one of: list, show, help',
             { operation }
           );
         }
@@ -717,6 +724,7 @@ module.exports = {
   stopGuiServer,
   guiStatus,
   resolvePreferredGuiPort: guiRegistry.resolvePreferredGuiPort,
+  playbook,
   server,
   main
 };

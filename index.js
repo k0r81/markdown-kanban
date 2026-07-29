@@ -11,9 +11,11 @@
 const kanban = require('./kanban.js');
 const plan = require('./plan.js');
 const guiRegistry = require('./gui-registry.js');
+const playbook = require('./agent-playbook.js');
 
 module.exports = {
   kanban,
   plan,
   guiRegistry,
+  playbook,
 };

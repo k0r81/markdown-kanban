@@ -129,9 +129,11 @@ Once connected, your agent gets access to these tools:
 
 | Tool | What it does |
 |------|-------------|
-| `kanban_read` | List tasks, filter by column/epic, show details |
-| `kanban_manage` | Create, move, patch-update tasks |
-| `kanban_gui` | Start / status / stop web GUI (stop only kills GUI started by this MCP process) |
+| `kanban_read` | List/show tasks (`view=summary` by default — cheap) |
+| `kanban_manage` | Create, move, update, plan_* workflow |
+| `kanban_gui` | Start / status / stop (stop only kills GUI this MCP started) |
+
+**Token tip for agents:** rules ship inside MCP tool descriptions (`agent-playbook.js`). Optional: `kanban_read` → `operation: "help"`. Human setup notes: [LLM_AGENTS.md](./LLM_AGENTS.md).
 
 Your agent stays in sync with your real board — every change is persisted as JSON files.
 

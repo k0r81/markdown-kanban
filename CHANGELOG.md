@@ -5,6 +5,23 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-07-29
+
+### Added
+- `agent-playbook.js` — single source of truth for agent token rules
+- `kanban_read` `operation=help` returns the playbook (no board I/O)
+- Test that `tools/list` descriptions match the playbook module
+
+### Changed
+- MCP tool descriptions are loaded from `agent-playbook.js` (not duplicated prose)
+- `LLM_AGENTS.md` clarified as human setup docs; agents rely on tool descriptions
+
+## [3.0.1] - 2026-07-29
+
+### Changed
+- MCP tool descriptions encode a token-efficient agent playbook (cheap list/show, fat create once, `return=none`, plan_* only when needed, GUI ownership)
+- `LLM_AGENTS.md`, `AGENTS.md`, and `README.md` document the same rules for project-scoped agents
+
 ## [3.0.0] - 2026-07-29
 
 ### Breaking

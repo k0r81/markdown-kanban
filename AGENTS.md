@@ -2,6 +2,17 @@
 
 This document provides build commands, testing procedures, and code style guidelines for working with the kanbango codebase.
 
+## Kanbango MCP — token rules (when using this board)
+
+Source of truth: `agent-playbook.js` (also MCP tool descriptions + `kanban_read` `operation=help`).
+
+- list: `col` filter, `view=summary`; keep `task_id`s; no full-board re-list after every write
+- show: `view=execution` while coding; `full` only if needed
+- create once with `description`, `specs`, `in_scope`, `out_of_scope`, `acceptance_criteria`
+- move/update: `return=none`; subtasks = full array replace (no toggle)
+- non-trivial work: `plan_create` → `plan_advance` → `plan_evidence` (real tests, truncated logs) → `plan_done`
+- gui: `status` before `start`; `stop` only owned; `external_running` = do not kill
+
 ## Build & Development Commands
 
 ### Available Scripts
