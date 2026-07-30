@@ -157,16 +157,28 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   background: #f8fafc;
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
   user-select: none;
 }
-.sl-header:hover { background: #f1f5f9; }
-.sl-arrow { font-size: 10px; color: var(--muted); transition: transform 0.15s; }
-.sl-header.collapsed .sl-arrow { transform: rotate(-90deg); }
-.sl-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.sl-header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.sl-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.sl-id {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.3px;
+}
 .sl-cnt {
   font-size: 11px;
   color: var(--muted);
@@ -175,64 +187,201 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   padding: 1px 6px;
   font-weight: 600;
 }
+.sl-status {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.sl-status.empty { background: #f1f5f9; color: #64748b; }
+.sl-status.planned { background: #dbeafe; color: #1d4ed8; }
+.sl-status.active { background: #ffedd5; color: #c2410c; }
+.sl-status.done { background: #dcfce7; color: #15803d; }
 .sl-progress {
-  margin-left: auto;
   font-size: 11px;
   color: var(--muted);
+  white-space: nowrap;
 }
+.sl-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.sl-toggle {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sl-toggle:hover { background: #f1f5f9; color: var(--text); }
+.sl-toggle.on {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
+  color: #3730a3;
+}
+.sl-toggle .chev { font-size: 9px; transition: transform 0.15s; display: inline-block; }
+.sl-toggle.on .chev { transform: rotate(90deg); }
 .sl-edit-btn {
   border: none;
   background: #e2e8f0;
   color: var(--muted);
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 10px;
   font-weight: 700;
-  padding: 2px 8px;
+  padding: 4px 9px;
   cursor: pointer;
   font-family: inherit;
-  margin-left: 4px;
 }
 .sl-edit-btn:hover { background: #cbd5e1; color: var(--text); }
+.sl-edit-btn.active { background: #c7d2fe; color: #3730a3; }
 
 /* ── Epic detail panel (swimlane context) ── */
-.sl-epic-detail {
-  padding: 10px 14px 12px;
+.sl-epic-shell {
   border-bottom: 1px solid var(--border);
-  background: #fafbfc;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 16px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+.sl-epic-detail {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   font-size: 12px;
 }
-.sl-epic-detail.full-width { grid-template-columns: 1fr; }
-.sl-epic-block { min-width: 0; }
-.sl-epic-block.span2 { grid-column: 1 / -1; }
+.sl-epic-hero {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.sl-epic-goals {
+  flex: 1;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #6366f1;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.sl-epic-goals .sl-epic-label { color: #6366f1; }
+.sl-epic-goals .sl-epic-text {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #1e293b;
+}
+.sl-epic-rollup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+}
+.sl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+.sl-chip strong { color: #0f172a; font-weight: 700; }
+.sl-chip.done { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+.sl-chip.active { border-color: #fed7aa; background: #fff7ed; color: #c2410c; }
+.sl-chip.planned { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.sl-chip.icebox { border-color: #e2e8f0; background: #f8fafc; color: #64748b; }
+
+.sl-epic-body {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 900px) {
+  .sl-epic-body { grid-template-columns: 1fr; }
+}
+.sl-epic-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.sl-epic-card.scope-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
 .sl-epic-label {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.55px;
   color: var(--muted);
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
 .sl-epic-text {
-  color: var(--text);
+  color: #334155;
   white-space: pre-wrap;
-  line-height: 1.4;
+  line-height: 1.5;
   word-break: break-word;
 }
-.sl-epic-text.empty { color: var(--muted); font-style: italic; }
+.sl-epic-text.empty { color: #94a3b8; font-style: italic; }
 .sl-epic-list {
   margin: 0;
-  padding-left: 16px;
-  color: var(--text);
-  line-height: 1.45;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.sl-epic-list.out { color: #94a3b8; }
+.sl-epic-list li {
+  position: relative;
+  padding: 4px 8px 4px 22px;
+  background: #f8fafc;
+  border-radius: 6px;
+  line-height: 1.4;
+  color: #334155;
+}
+.sl-epic-list li::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+}
+.sl-epic-list.out li {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+.sl-epic-list.out li::before { background: #cbd5e1; }
+.sl-epic-notes {
+  border-style: dashed;
+  color: #64748b;
+}
+
 .sl-epic-edit-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 12px;
+  padding: 12px 14px 14px;
 }
 .sl-epic-edit-grid .span2 { grid-column: 1 / -1; }
 .sl-epic-edit-grid label {
@@ -255,6 +404,7 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   color: var(--text);
   box-sizing: border-box;
   resize: vertical;
+  background: #fff;
 }
 .sl-epic-edit-grid textarea { min-height: 52px; }
 .sl-epic-edit-actions {
@@ -636,7 +786,9 @@ const COL_DEFS = [
 let allTasks   = [];
 let allEpicEntities = [];
 let colCounts  = {};
-let collapsed  = new Set();
+// Separate collapse: epic info panel vs task board (default: info open, tasks open)
+let collapsedInfo = new Set();
+let collapsedTasks = new Set();
 let expanded   = new Set();
 let editingId  = null;
 let dirtyEdits = {}; // taskId -> editable task draft
@@ -730,54 +882,62 @@ function epicListHtml(items, emptyLabel, extraClass) {
 }
 
 function renderEpicDetailView(entity) {
+  const shell = el("div", "sl-epic-shell");
   const panel = el("div", "sl-epic-detail");
+  const p = entity.progress || {};
 
-  const goals = el("div", "sl-epic-block span2");
+  const hero = el("div", "sl-epic-hero");
+  const goals = el("div", "sl-epic-goals");
   goals.innerHTML = `<div class="sl-epic-label">Goals</div>${
     entity.goals
       ? `<div class="sl-epic-text">${escHtml(entity.goals)}</div>`
       : `<div class="sl-epic-text empty">No goals set</div>`
   }`;
-  panel.appendChild(goals);
+  hero.appendChild(goals);
 
-  const desc = el("div", "sl-epic-block span2");
-  desc.innerHTML = `<div class="sl-epic-label">Description</div>${
+  const rollup = el("div", "sl-epic-rollup");
+  rollup.innerHTML = `
+    <span class="sl-chip"><strong>${p.tasks_total || 0}</strong> total</span>
+    <span class="sl-chip active"><strong>${p.tasks_active || 0}</strong> active</span>
+    <span class="sl-chip planned"><strong>${p.tasks_planned || 0}</strong> planned</span>
+    <span class="sl-chip icebox"><strong>${p.tasks_icebox || 0}</strong> icebox</span>
+    <span class="sl-chip done"><strong>${p.tasks_done || 0}</strong> done</span>
+  `;
+  hero.appendChild(rollup);
+  panel.appendChild(hero);
+
+  const body = el("div", "sl-epic-body");
+
+  const descCard = el("div", "sl-epic-card");
+  descCard.innerHTML = `<div class="sl-epic-label">Description</div>${
     entity.description
       ? `<div class="sl-epic-text">${escHtml(entity.description)}</div>`
-      : `<div class="sl-epic-text empty">No description</div>`
+      : `<div class="sl-epic-text empty">No description yet — click Edit epic to add context for agents.</div>`
   }`;
-  panel.appendChild(desc);
+  body.appendChild(descCard);
 
-  const inScope = el("div", "sl-epic-block");
-  inScope.innerHTML = `<div class="sl-epic-label">In scope</div>${
-    epicListHtml(entity.in_scope, "—", "")
-  }`;
-  panel.appendChild(inScope);
-
-  const outScope = el("div", "sl-epic-block");
-  outScope.innerHTML = `<div class="sl-epic-label">Out of scope</div>${
-    epicListHtml(entity.out_of_scope, "—", "out")
-  }`;
-  panel.appendChild(outScope);
+  const scopeCard = el("div", "sl-epic-card scope-pair");
+  scopeCard.innerHTML = `
+    <div>
+      <div class="sl-epic-label">In scope</div>
+      ${epicListHtml(entity.in_scope, "Nothing listed", "")}
+    </div>
+    <div>
+      <div class="sl-epic-label">Out of scope</div>
+      ${epicListHtml(entity.out_of_scope, "Nothing listed", "out")}
+    </div>
+  `;
+  body.appendChild(scopeCard);
+  panel.appendChild(body);
 
   if (entity.notes) {
-    const notes = el("div", "sl-epic-block span2");
+    const notes = el("div", "sl-epic-card sl-epic-notes");
     notes.innerHTML = `<div class="sl-epic-label">Notes</div><div class="sl-epic-text">${escHtml(entity.notes)}</div>`;
     panel.appendChild(notes);
   }
 
-  const p = entity.progress || {};
-  const rollup = el("div", "sl-epic-block span2");
-  rollup.innerHTML = `<div class="sl-epic-label">Rollup</div>
-    <div class="sl-epic-text">status: <strong>${escHtml(entity.status || "—")}</strong>
-    · total ${p.tasks_total || 0}
-    · active ${p.tasks_active || 0}
-    · planned ${p.tasks_planned || 0}
-    · icebox ${p.tasks_icebox || 0}
-    · done ${p.tasks_done || 0}</div>`;
-  panel.appendChild(rollup);
-
-  return panel;
+  shell.appendChild(panel);
+  return shell;
 }
 
 function renderEpicDetailEdit(entity) {
@@ -791,8 +951,8 @@ function renderEpicDetailEdit(entity) {
   };
   dirtyEpicEdits[entity.id] = dirty;
 
-  const panel = el("div", "sl-epic-detail full-width");
-  panel.onclick = e => e.stopPropagation();
+  const shell = el("div", "sl-epic-shell");
+  shell.onclick = e => e.stopPropagation();
 
   const grid = el("div", "sl-epic-edit-grid");
 
@@ -865,8 +1025,8 @@ function renderEpicDetailEdit(entity) {
   actions.appendChild(cancelBtn);
   grid.appendChild(actions);
 
-  panel.appendChild(grid);
-  return panel;
+  shell.appendChild(grid);
+  return shell;
 }
 
 async function saveEpicEdit(epicId) {
@@ -896,46 +1056,66 @@ async function saveEpicEdit(epicId) {
 
 // ── Swimlane ──────────────────────────────────────────────────────────────────
 
+function toggleSet(set, key) {
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+}
+
+function makeToggleBtn(label, isOn, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `sl-toggle${isOn ? " on" : ""}`;
+  btn.innerHTML = `<span class="chev">▶</span>${label}`;
+  btn.onclick = e => { e.stopPropagation(); onClick(); };
+  return btn;
+}
+
 function renderSwimlane({ key, name, epicId, entity, tasks }) {
-  const isCollapsed = collapsed.has(key);
+  const infoOpen = entity ? !collapsedInfo.has(key) : false;
+  const tasksOpen = !collapsedTasks.has(key);
   const isEditingEpic = epicId && editingEpicId === epicId;
 
   const wrap = el("div", "swimlane");
 
-  // Header
-  const hdr = el("div", `sl-header${isCollapsed ? " collapsed" : ""}`);
+  const hdr = el("div", "sl-header");
   const totalTasks = tasks.reduce((s, e) => s + (e.subtasks || []).length, 0);
   const doneTasks  = tasks.reduce((s, e) => s + (e.subtasks || []).filter(t => t.done).length, 0);
   const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : null;
   const cardsDone = tasks.filter(t => t.column === "done").length;
-  const status = entity ? entity.status : null;
-  const statusBadge = status ? `<span class="sl-cnt" title="derived status">${escHtml(status)}</span>` : "";
+  const status = entity ? (entity.status || "empty") : null;
 
-  const left = el("div");
-  left.style.cssText = "display:flex;align-items:center;gap:8px;flex:1;min-width:0";
-  left.innerHTML = `
-    <span class="sl-arrow">▼</span>
-    <span class="sl-name">${escHtml(name === "—" ? "Uncategorized (no epic)" : name)}${epicId ? ` <small style="opacity:.6">${escHtml(epicId)}</small>` : ""}</span>
+  const main = el("div", "sl-header-main");
+  const titleHtml = name === "—"
+    ? "Uncategorized (no epic)"
+    : escHtml(name);
+  main.innerHTML = `
+    <span class="sl-name">${titleHtml}</span>
+    ${epicId ? `<span class="sl-id">${escHtml(epicId)}</span>` : ""}
+    ${status ? `<span class="sl-status ${escHtml(status)}">${escHtml(status)}</span>` : ""}
     <span class="sl-cnt">${tasks.length} cards · ${cardsDone} done</span>
-    ${statusBadge}
+    ${pct !== null ? `<span class="sl-progress">${pct}% subtasks</span>` : ""}
   `;
-  left.onclick = () => {
-    if (collapsed.has(key)) collapsed.delete(key);
-    else collapsed.add(key);
-    render();
-  };
-  hdr.appendChild(left);
+  hdr.appendChild(main);
 
-  if (pct !== null) {
-    const prog = el("span", "sl-progress");
-    prog.textContent = `${pct}% subtasks`;
-    hdr.appendChild(prog);
+  const toggles = el("div", "sl-toggles");
+
+  if (entity) {
+    toggles.appendChild(makeToggleBtn("Info", infoOpen, () => {
+      toggleSet(collapsedInfo, key);
+      render();
+    }));
   }
+
+  toggles.appendChild(makeToggleBtn("Tasks", tasksOpen, () => {
+    toggleSet(collapsedTasks, key);
+    render();
+  }));
 
   if (epicId && entity) {
     const editBtn = document.createElement("button");
-    editBtn.className = "sl-edit-btn";
-    editBtn.textContent = isEditingEpic ? "Editing…" : "Edit epic";
+    editBtn.type = "button";
+    editBtn.className = `sl-edit-btn${isEditingEpic ? " active" : ""}`;
+    editBtn.textContent = isEditingEpic ? "Editing…" : "Edit";
     editBtn.onclick = e => {
       e.stopPropagation();
       if (editingEpicId === epicId) {
@@ -943,27 +1123,26 @@ function renderSwimlane({ key, name, epicId, entity, tasks }) {
         delete dirtyEpicEdits[epicId];
       } else {
         editingEpicId = epicId;
+        collapsedInfo.delete(key);
       }
-      if (collapsed.has(key)) collapsed.delete(key);
       render();
     };
-    hdr.appendChild(editBtn);
+    toggles.appendChild(editBtn);
   }
 
+  hdr.appendChild(toggles);
   wrap.appendChild(hdr);
 
-  if (!isCollapsed && entity) {
+  if (entity && (infoOpen || isEditingEpic)) {
     wrap.appendChild(
       isEditingEpic ? renderEpicDetailEdit(entity) : renderEpicDetailView(entity)
     );
   }
 
-  // Body
-  const body = el("div", `sl-body${isCollapsed ? " hidden" : ""}`);
+  const body = el("div", `sl-body${tasksOpen ? "" : " hidden"}`);
   COL_DEFS.forEach(col => {
     const lane = el("div", `lane col-${col.id}`);
     tasks.filter(e => e.column === col.id).forEach(e => lane.appendChild(renderCard(e, col.id)));
-    // Add button only in non-done columns
     if (col.id !== "done") {
       const addBtn = document.createElement("button");
       addBtn.className = "lane-add";
