@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 
 const BACKLOG = path.join(process.cwd(), 'backlog');
+const EPICS_DIR = path.join(BACKLOG, 'epics');
 const COLS = ['active', 'planned', 'icebox', 'done'];
 const STATUS_MAP = {
   active: 'in_progress',
@@ -10,11 +11,12 @@ const STATUS_MAP = {
   done: 'done'
 };
 const VIEW_FIELDS = {
-  summary: ['task_number', 'title', 'column', 'epic_group', 'created', 'progress'],
+  summary: ['task_number', 'title', 'column', 'epic_id', 'epic_group', 'created', 'progress'],
   planning: [
     'task_number',
     'title',
     'column',
+    'epic_id',
     'epic_group',
     'created',
     'progress',
@@ -29,6 +31,7 @@ const VIEW_FIELDS = {
     'task_number',
     'title',
     'column',
+    'epic_id',
     'epic_group',
     'created',
     'progress',
@@ -44,6 +47,7 @@ const VIEW_FIELDS = {
     'task_number',
     'title',
     'column',
+    'epic_id',
     'epic_group',
     'created',
     'progress',
@@ -58,6 +62,34 @@ const VIEW_FIELDS = {
   ]
 };
 
+const EPIC_VIEW_FIELDS = {
+  summary: ['id', 'title', 'created', 'status', 'progress'],
+  planning: [
+    'id',
+    'title',
+    'created',
+    'status',
+    'progress',
+    'description',
+    'goals',
+    'in_scope',
+    'out_of_scope'
+  ],
+  full: [
+    'id',
+    'title',
+    'created',
+    'status',
+    'progress',
+    'description',
+    'goals',
+    'in_scope',
+    'out_of_scope',
+    'notes',
+    'tasks'
+  ]
+};
+
 // Hard-required on create: title only (keeps GUI/CLI quick-add usable).
 // Strongly recommended for agent/planned work — missing ones yield warnings, not errors.
 const RECOMMENDED_CREATE_FIELDS = [
@@ -66,6 +98,13 @@ const RECOMMENDED_CREATE_FIELDS = [
   'in_scope',
   'out_of_scope',
   'acceptance_criteria'
+];
+
+const RECOMMENDED_EPIC_CREATE_FIELDS = [
+  'description',
+  'goals',
+  'in_scope',
+  'out_of_scope'
 ];
 
 function createKanbanError(code, message, hint, details = {}, retryable = false, status = 400) {
@@ -103,7 +142,12 @@ function normalizeStringArray(value) {
 }
 
 function isPresentCreateField(field, value) {
-  if (field === 'description' || field === 'specs' || field === 'notes') {
+  if (
+    field === 'description'
+    || field === 'specs'
+    || field === 'notes'
+    || field === 'goals'
+  ) {
     return Boolean(normalizeString(value));
   }
   if (
@@ -123,6 +167,10 @@ function missingRecommendedCreateFields(payload = {}) {
   return RECOMMENDED_CREATE_FIELDS.filter((field) => !isPresentCreateField(field, payload[field]));
 }
 
+function missingRecommendedEpicCreateFields(payload = {}) {
+  return RECOMMENDED_EPIC_CREATE_FIELDS.filter((field) => !isPresentCreateField(field, payload[field]));
+}
+
 function createFieldWarnings(payload = {}) {
   const missing = missingRecommendedCreateFields(payload);
   if (missing.length === 0) return [];
@@ -130,6 +178,28 @@ function createFieldWarnings(payload = {}) {
     `Strongly recommended fields missing: ${missing.join(', ')}. ` +
       'Fill them on create (or via update) so scope and done-criteria are explicit.'
   ];
+}
+
+function createEpicFieldWarnings(payload = {}) {
+  const missing = missingRecommendedEpicCreateFields(payload);
+  if (missing.length === 0) return [];
+  return [
+    `Strongly recommended epic fields missing: ${missing.join(', ')}. ` +
+      'Fill them so agents get initiative context and boundaries.'
+  ];
+}
+
+function normalizeEpicId(value) {
+  const raw = normalizeString(value);
+  if (!raw || raw === '—') return null;
+  const match = raw.match(/^E0*(\d+)$/i);
+  if (match) return `E${String(parseInt(match[1], 10)).padStart(3, '0')}`;
+  return null;
+}
+
+function isBlankEpicRef(value) {
+  const raw = normalizeString(value);
+  return !raw || raw === '—';
 }
 
 function normalizeSubtasks(value) {
@@ -164,11 +234,14 @@ function normalizePlan(value) {
 
 function normalizeTask(task) {
   const id = normalizeString(task.id);
+  const epicId = normalizeEpicId(task.epic_id);
+  const epicGroup = normalizeString(task.epic_group, '—') || '—';
   const normalized = {
     id,
     title: stripTitlePrefix(task.title || id),
     column: COLS.includes(task.column) ? task.column : 'planned',
-    epic_group: normalizeString(task.epic_group, '—') || '—',
+    epic_id: epicId,
+    epic_group: epicId ? (epicGroup === '—' ? epicId : epicGroup) : (epicGroup === '—' ? '—' : epicGroup),
     created: normalizeString(task.created) || todayIso(),
     description: normalizeString(task.description),
     specs: normalizeString(task.specs),
@@ -192,6 +265,7 @@ function serializeTask(task) {
     id: normalized.id,
     title: normalized.title,
     column: normalized.column,
+    epic_id: normalized.epic_id,
     epic_group: normalized.epic_group,
     created: normalized.created,
     description: normalized.description,
@@ -206,6 +280,83 @@ function serializeTask(task) {
     evidence: normalized.evidence,
     task_number: normalized.task_number
   };
+}
+
+function normalizeEpic(epic) {
+  const id = normalizeEpicId(epic && epic.id) || normalizeString(epic && epic.id);
+  return {
+    id,
+    title: stripTitlePrefix((epic && epic.title) || id),
+    created: normalizeString(epic && epic.created) || todayIso(),
+    description: normalizeString(epic && epic.description),
+    goals: normalizeString(epic && epic.goals),
+    in_scope: normalizeStringArray(epic && epic.in_scope),
+    out_of_scope: normalizeStringArray(epic && epic.out_of_scope),
+    notes: normalizeString(epic && epic.notes)
+  };
+}
+
+function serializeEpic(epic) {
+  const normalized = normalizeEpic(epic);
+  return {
+    id: normalized.id,
+    title: normalized.title,
+    created: normalized.created,
+    description: normalized.description,
+    goals: normalized.goals,
+    in_scope: normalized.in_scope,
+    out_of_scope: normalized.out_of_scope,
+    notes: normalized.notes
+  };
+}
+
+function deriveEpicStatus(tasks) {
+  if (!tasks || tasks.length === 0) return 'empty';
+  if (tasks.some((task) => task.column === 'active')) return 'active';
+  if (tasks.every((task) => task.column === 'done')) return 'done';
+  return 'planned';
+}
+
+function getEpicProgress(tasks) {
+  const progress = {
+    tasks_total: tasks.length,
+    tasks_done: 0,
+    tasks_active: 0,
+    tasks_planned: 0,
+    tasks_icebox: 0
+  };
+  for (const task of tasks) {
+    if (task.column === 'done') progress.tasks_done += 1;
+    else if (task.column === 'active') progress.tasks_active += 1;
+    else if (task.column === 'planned') progress.tasks_planned += 1;
+    else if (task.column === 'icebox') progress.tasks_icebox += 1;
+  }
+  return progress;
+}
+
+function pickEpicFields(epicPayload, fieldNames) {
+  const picked = {};
+  for (const field of fieldNames) {
+    if (field in epicPayload) {
+      picked[field] = epicPayload[field];
+    }
+  }
+  return picked;
+}
+
+function shapeEpic(epic, tasks = [], options = {}) {
+  const normalized = normalizeEpic(epic);
+  const childTasks = tasks.filter((task) => task.epic_id === normalized.id);
+  const payload = {
+    ...normalized,
+    status: deriveEpicStatus(childTasks),
+    progress: getEpicProgress(childTasks),
+    tasks: childTasks.map((task) => shapeTask(task, { view: 'summary' }))
+  };
+  const fields = Array.isArray(options.fields) && options.fields.length > 0
+    ? options.fields
+    : (EPIC_VIEW_FIELDS[options.view || 'full'] || EPIC_VIEW_FIELDS.full);
+  return pickEpicFields(payload, fields);
 }
 
 function getProgress(task) {
@@ -269,6 +420,7 @@ async function ensureBacklogDir() {
     const colDir = path.join(BACKLOG, col);
     await fs.mkdir(colDir, { recursive: true });
   }
+  await fs.mkdir(EPICS_DIR, { recursive: true });
 }
 
 async function parseMarkdownTask(filePath, column) {
@@ -369,6 +521,331 @@ async function allEpics() {
   }
 
   return epics;
+}
+
+async function allTasks() {
+  return allEpics();
+}
+
+function epicFilePath(epicId) {
+  return path.join(EPICS_DIR, `${epicId}.json`);
+}
+
+async function nextEpicNumber() {
+  await ensureBacklogDir();
+  const ids = [];
+  try {
+    const files = await fs.readdir(EPICS_DIR);
+    for (const file of files) {
+      const match = file.match(/^E0*(\d+)\.json$/i);
+      if (match) ids.push(parseInt(match[1], 10));
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return ids.length > 0 ? Math.max(...ids) + 1 : 1;
+}
+
+async function parseJsonEpic(filePath) {
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch (error) {
+    if (error.code === 'ENOENT') throw error;
+    throw createKanbanError(
+      'PARSE_ERROR',
+      `Epic file ${path.basename(filePath)} could not be read`,
+      'Fix permissions or restore the file from version control',
+      { file: filePath, reason: error.message },
+      false,
+      500
+    );
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (error) {
+    throw createKanbanError(
+      'PARSE_ERROR',
+      `Epic file ${path.basename(filePath)} could not be parsed`,
+      'Fix the JSON syntax or restore the file from version control',
+      { file: filePath, reason: error.message },
+      false,
+      500
+    );
+  }
+  return normalizeEpic({
+    ...data,
+    id: data.id || path.basename(filePath, '.json')
+  });
+}
+
+async function listEpicEntities() {
+  await ensureBacklogDir();
+  const epics = [];
+  try {
+    const files = (await fs.readdir(EPICS_DIR))
+      .filter((file) => file.endsWith('.json'))
+      .sort((left, right) => left.localeCompare(right));
+    for (const file of files) {
+      try {
+        epics.push(await parseJsonEpic(path.join(EPICS_DIR, file)));
+      } catch (error) {
+        console.error(`  parse error ${file}: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return epics;
+}
+
+async function writeEpic(epic) {
+  const normalized = normalizeEpic(epic);
+  if (!normalizeEpicId(normalized.id)) {
+    throw createKanbanError(
+      'VALIDATION_ERROR',
+      'epic id must look like E001',
+      'Use an epic id such as E001',
+      { epic_id: normalized.id },
+      false,
+      400
+    );
+  }
+  await ensureBacklogDir();
+  const filePath = epicFilePath(normalized.id);
+  await fs.writeFile(filePath, JSON.stringify(serializeEpic(normalized), null, 2) + '\n', 'utf-8');
+  return parseJsonEpic(filePath);
+}
+
+async function getEpicEntity(epicId) {
+  const id = normalizeEpicId(epicId) || normalizeString(epicId);
+  if (!id) {
+    throw createKanbanError(
+      'EPIC_NOT_FOUND',
+      `Epic ${epicId} was not found`,
+      'Call kanban_read with operation=list_epics to discover valid epic ids',
+      { epic_id: epicId },
+      false,
+      404
+    );
+  }
+  const filePath = epicFilePath(normalizeEpicId(id) || id);
+  try {
+    return await parseJsonEpic(filePath);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'PARSE_ERROR') {
+      if (error.code === 'PARSE_ERROR') throw error;
+      throw createKanbanError(
+        'EPIC_NOT_FOUND',
+        `Epic ${epicId} was not found`,
+        'Call kanban_read with operation=list_epics to discover valid epic ids',
+        { epic_id: epicId },
+        false,
+        404
+      );
+    }
+    throw error;
+  }
+}
+
+async function findEpicsByTitle(title) {
+  const needle = normalizeString(title).toLowerCase();
+  if (!needle) return [];
+  const epics = await listEpicEntities();
+  return epics.filter((epic) => epic.title.toLowerCase() === needle);
+}
+
+async function resolveEpicRef(ref, options = {}) {
+  if (isBlankEpicRef(ref)) {
+    return { epic_id: null, epic_group: '—' };
+  }
+
+  const asId = normalizeEpicId(ref);
+  if (asId) {
+    const epic = await getEpicEntity(asId);
+    return { epic_id: epic.id, epic_group: epic.title };
+  }
+
+  const matches = await findEpicsByTitle(ref);
+  if (matches.length === 1) {
+    return { epic_id: matches[0].id, epic_group: matches[0].title };
+  }
+  if (matches.length > 1) {
+    throw createKanbanError(
+      'AMBIGUOUS_EPIC',
+      `Multiple epics titled "${normalizeString(ref)}"`,
+      'Use an epic id (E001) instead of the title',
+      { title: normalizeString(ref), epic_ids: matches.map((epic) => epic.id) },
+      false,
+      400
+    );
+  }
+
+  if (options.createIfMissing) {
+    const created = await doCreateEpic(normalizeString(ref), {});
+    return { epic_id: created.id, epic_group: created.title };
+  }
+
+  throw createKanbanError(
+    'EPIC_NOT_FOUND',
+    `Epic "${normalizeString(ref)}" was not found`,
+    'Create it with epic_create or pass an existing epic id/title',
+    { epic: normalizeString(ref) },
+    false,
+    404
+  );
+}
+
+async function doCreateEpic(title, extra = {}) {
+  if (!normalizeString(title)) {
+    throw createKanbanError(
+      'MISSING_REQUIRED_FIELD',
+      'title is required',
+      'Provide a non-empty title when creating an epic',
+      { field: 'title' },
+      false,
+      400
+    );
+  }
+
+  const nextId = await nextEpicNumber();
+  const epic = normalizeEpic({
+    id: `E${String(nextId).padStart(3, '0')}`,
+    title,
+    created: todayIso(),
+    description: extra.description,
+    goals: extra.goals,
+    in_scope: extra.in_scope,
+    out_of_scope: extra.out_of_scope,
+    notes: extra.notes
+  });
+  return writeEpic(epic);
+}
+
+async function updateEpicEntity(epicId, patch) {
+  validatePatch(patch);
+  const current = await getEpicEntity(epicId);
+  const next = { ...current };
+
+  if (patch.title !== undefined) {
+    const title = normalizeString(patch.title);
+    if (!title) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'title must be a non-empty string',
+        'Send a non-empty title or omit the field',
+        { field: 'title' },
+        false,
+        400
+      );
+    }
+    next.title = title;
+  }
+  if (patch.description !== undefined) next.description = normalizeString(patch.description);
+  if (patch.goals !== undefined) next.goals = normalizeString(patch.goals);
+  if (patch.in_scope !== undefined) {
+    if (!Array.isArray(patch.in_scope)) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'in_scope must be an array of strings',
+        'Send in_scope as an array',
+        { field: 'in_scope' },
+        false,
+        400
+      );
+    }
+    next.in_scope = normalizeStringArray(patch.in_scope);
+  }
+  if (patch.out_of_scope !== undefined) {
+    if (!Array.isArray(patch.out_of_scope)) {
+      throw createKanbanError(
+        'VALIDATION_ERROR',
+        'out_of_scope must be an array of strings',
+        'Send out_of_scope as an array',
+        { field: 'out_of_scope' },
+        false,
+        400
+      );
+    }
+    next.out_of_scope = normalizeStringArray(patch.out_of_scope);
+  }
+  if (patch.notes !== undefined) next.notes = normalizeString(patch.notes);
+
+  const saved = await writeEpic(next);
+
+  if (patch.title !== undefined && saved.title !== current.title) {
+    const tasks = await allTasks();
+    for (const task of tasks) {
+      if (task.epic_id === saved.id && task.epic_group !== saved.title) {
+        await updateTask(task.id, { epic_group: saved.title, _skipEpicResolve: true });
+      }
+    }
+  }
+
+  return saved;
+}
+
+async function migrateEpicGroups(options = {}) {
+  await ensureBacklogDir();
+  const tasks = await allTasks();
+  const existing = await listEpicEntities();
+  const byTitle = new Map(existing.map((epic) => [epic.title.toLowerCase(), epic]));
+  const created = [];
+  const linked = [];
+  const dryRun = Boolean(options.dryRun);
+
+  const labels = new Set();
+  for (const task of tasks) {
+    if (!task.epic_id && task.epic_group && task.epic_group !== '—') {
+      labels.add(task.epic_group);
+    }
+  }
+
+  for (const label of labels) {
+    const key = label.toLowerCase();
+    let epic = byTitle.get(key);
+    if (!epic) {
+      if (dryRun) {
+        created.push({ title: label });
+        epic = { id: `(new)`, title: label };
+      } else {
+        epic = await doCreateEpic(label, {
+          description: `Migrated from epic_group label "${label}".`
+        });
+        created.push({ id: epic.id, title: epic.title });
+      }
+      byTitle.set(key, epic);
+    }
+  }
+
+  for (const task of tasks) {
+    if (task.epic_id || !task.epic_group || task.epic_group === '—') continue;
+    const epic = byTitle.get(task.epic_group.toLowerCase());
+    if (!epic || !epic.id || epic.id === '(new)') {
+      linked.push({ task_id: task.id, epic_group: task.epic_group, dry_run: true });
+      continue;
+    }
+    if (!dryRun) {
+      await updateTask(task.id, {
+        epic_id: epic.id,
+        epic_group: epic.title,
+        _skipEpicResolve: true
+      });
+    }
+    linked.push({ task_id: task.id, epic_id: epic.id, epic_group: epic.title });
+  }
+
+  return { created, linked, dry_run: dryRun };
+}
+
+function taskMatchesEpicFilter(task, epicFilter) {
+  if (isBlankEpicRef(epicFilter)) return true;
+  const asId = normalizeEpicId(epicFilter);
+  if (asId) return task.epic_id === asId;
+  const needle = normalizeString(epicFilter).toLowerCase();
+  return task.epic_group.toLowerCase() === needle
+    || (task.epic_id && task.epic_id.toLowerCase() === needle);
 }
 
 async function findFile(epicId) {
@@ -545,7 +1022,7 @@ function validatePatch(patch) {
   }
 }
 
-async function doCreate(title, column = 'planned', epicGroup = '—', extra = {}) {
+async function doCreate(title, column = 'planned', epicRef = '—', extra = {}) {
   if (!normalizeString(title)) {
     throw createKanbanError(
       'MISSING_REQUIRED_FIELD',
@@ -559,12 +1036,20 @@ async function doCreate(title, column = 'planned', epicGroup = '—', extra = {}
 
   validateColumn(column, 'col');
 
+  let epicLink = { epic_id: null, epic_group: '—' };
+  if (!isBlankEpicRef(epicRef)) {
+    epicLink = await resolveEpicRef(epicRef, { createIfMissing: true });
+  } else if (extra.epic_id) {
+    epicLink = await resolveEpicRef(extra.epic_id, { createIfMissing: false });
+  }
+
   const nextId = await nextTaskNumber();
   const task = normalizeTask({
     id: String(nextId).padStart(3, '0'),
     title,
     column,
-    epic_group: epicGroup || '—',
+    epic_id: epicLink.epic_id,
+    epic_group: epicLink.epic_group,
     created: todayIso(),
     description: extra.description,
     specs: extra.specs,
@@ -618,7 +1103,24 @@ async function updateTask(taskId, patch) {
     }
     next.title = title;
   }
-  if (patch.epic_group !== undefined) next.epic_group = normalizeString(patch.epic_group, '—') || '—';
+  if (!patch._skipEpicResolve) {
+    if (patch.epic_id !== undefined || patch.epic !== undefined || patch.epic_group !== undefined) {
+      const ref = patch.epic_id !== undefined
+        ? patch.epic_id
+        : (patch.epic !== undefined ? patch.epic : patch.epic_group);
+      if (isBlankEpicRef(ref)) {
+        next.epic_id = null;
+        next.epic_group = '—';
+      } else {
+        const link = await resolveEpicRef(ref, { createIfMissing: Boolean(patch.epic_group !== undefined && patch.epic_id === undefined && patch.epic === undefined) });
+        next.epic_id = link.epic_id;
+        next.epic_group = link.epic_group;
+      }
+    }
+  } else {
+    if (patch.epic_id !== undefined) next.epic_id = normalizeEpicId(patch.epic_id);
+    if (patch.epic_group !== undefined) next.epic_group = normalizeString(patch.epic_group, '—') || '—';
+  }
   if (patch.description !== undefined) next.description = normalizeString(patch.description);
   if (patch.specs !== undefined) next.specs = normalizeString(patch.specs);
   if (patch.in_scope !== undefined) {
@@ -764,22 +1266,38 @@ module.exports = {
   ensureBacklogDir,
   parseEpic,
   allEpics,
+  allTasks,
   findFile,
   getTask,
   shapeTask,
+  shapeEpic,
   updateTask,
   migrateAll,
+  migrateEpicGroups,
   doMove,
   doToggle,
   doUpdate,
   doCreate,
+  doCreateEpic,
+  updateEpicEntity,
+  getEpicEntity,
+  listEpicEntities,
+  resolveEpicRef,
+  taskMatchesEpicFilter,
   createKanbanError,
   createFieldWarnings,
+  createEpicFieldWarnings,
   missingRecommendedCreateFields,
+  missingRecommendedEpicCreateFields,
   getProgress,
+  getEpicProgress,
+  deriveEpicStatus,
   resolveTaskId,
   COLS,
   STATUS_MAP,
   VIEW_FIELDS,
-  RECOMMENDED_CREATE_FIELDS
+  EPIC_VIEW_FIELDS,
+  RECOMMENDED_CREATE_FIELDS,
+  RECOMMENDED_EPIC_CREATE_FIELDS,
+  EPICS_DIR
 };

@@ -293,13 +293,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             operation: {
               type: 'string',
-              enum: ['list', 'show', 'help'],
-              description: 'list=scan board; show=one task (needs task_id); help=token playbook (no board I/O)',
+              enum: ['list', 'show', 'list_epics', 'show_epic', 'help'],
+              description: 'list/show=tasks; list_epics/show_epic=initiative containers; help=token playbook',
               default: 'list'
             },
             task_id: {
               type: 'string',
               description: "Required for show. Numeric id: '014' or '14'."
+            },
+            epic_id: {
+              type: 'string',
+              description: "Required for show_epic. Epic id like 'E001'."
             },
             col: {
               type: 'string',
@@ -308,7 +312,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             epic: {
               type: 'string',
-              description: 'Filter list by epic group'
+              description: 'Filter list by epic id or title'
             },
             view: {
               type: 'string',
@@ -332,12 +336,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             action: {
               type: 'string',
-              enum: ['create', 'move', 'update', 'plan_create', 'plan_advance', 'plan_evidence', 'plan_done', 'plan_status'],
-              description: 'create|move|update daily; plan_* only for accepted multi-step work with tests'
+              enum: [
+                'create',
+                'move',
+                'update',
+                'epic_create',
+                'epic_update',
+                'plan_create',
+                'plan_advance',
+                'plan_evidence',
+                'plan_done',
+                'plan_status'
+              ],
+              description: 'create|move|update daily; epic_create|epic_update for containers; plan_* for multi-step work'
             },
             title: {
               type: 'string',
-              description: 'Required for create and plan_create'
+              description: 'Required for create, plan_create, epic_create'
             },
             col: {
               type: 'string',
@@ -348,11 +363,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             epic: {
               type: 'string',
               default: '—',
-              description: 'Epic group (create/update/plan_create)'
+              description: 'Epic id or title (create/update/plan_create). Prefer E001.'
+            },
+            epic_id: {
+              type: 'string',
+              description: 'Required for epic_update; optional filter/link id'
             },
             description: {
               type: 'string',
-              description: 'Why/context (recommended on create)'
+              description: 'Why/context (recommended on create / epic_create)'
+            },
+            goals: {
+              type: 'string',
+              description: 'Epic outcome one-liner (recommended on epic_create)'
             },
             specs: {
               type: 'string',
@@ -411,7 +434,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             return: {
               type: 'string',
               enum: ['none', 'summary', 'full'],
-              description: 'move/update response size. Prefer none. Default summary. create always returns full task once.'
+              description: 'move/update/epic_update response size. Prefer none. Default summary. create/epic_create return full once.'
             },
             index: {
               type: 'integer',
@@ -493,12 +516,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const readOptions = normalizeReadOptions(args, 'summary');
 
         if (operation === 'list') {
-          let tasks = await kanban.allEpics();
+          await kanban.migrateEpicGroups();
+          let tasks = await kanban.allTasks();
           if (args.col) {
             tasks = tasks.filter((task) => task.column === args.col);
           }
-          if (args.epic) {
-            tasks = tasks.filter((task) => task.epic_group === args.epic);
+          if (args.epic || args.epic_id) {
+            const filter = args.epic_id || args.epic;
+            tasks = tasks.filter((task) => kanban.taskMatchesEpicFilter(task, filter));
           }
 
           result = tasks.map((task) => kanban.shapeTask(task, readOptions));
@@ -512,10 +537,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
 
           result = kanban.shapeTask(await kanban.getTask(args.task_id), readOptions);
+        } else if (operation === 'list_epics') {
+          await kanban.migrateEpicGroups();
+          const tasks = await kanban.allTasks();
+          const epics = await kanban.listEpicEntities();
+          const epicView = args.view === 'full' || args.view === 'planning' || args.view === 'execution'
+            ? (args.view === 'execution' ? 'planning' : args.view)
+            : 'summary';
+          result = epics.map((epic) => kanban.shapeEpic(epic, tasks, {
+            view: Array.isArray(args.fields) && args.fields.length > 0 ? undefined : epicView,
+            fields: args.fields
+          }));
+        } else if (operation === 'show_epic') {
+          const epicRef = args.epic_id || args.epic;
+          if (!epicRef) {
+            throw invalidRequest(
+              "epic_id is required for 'show_epic' operation",
+              'Provide an epic id like E001',
+              { operation }
+            );
+          }
+          await kanban.migrateEpicGroups();
+          const link = await kanban.resolveEpicRef(epicRef, { createIfMissing: false });
+          const epic = await kanban.getEpicEntity(link.epic_id);
+          const tasks = await kanban.allTasks();
+          result = kanban.shapeEpic(epic, tasks, {
+            view: args.view || 'full',
+            fields: args.fields
+          });
         } else {
           throw invalidRequest(
             `Unknown operation: ${operation}`,
-            'Use one of: list, show, help',
+            'Use one of: list, show, list_epics, show_epic, help',
             { operation }
           );
         }
@@ -538,12 +591,61 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               subtasks: args.subtasks,
               notes: args.notes
             };
-            const created = await kanban.doCreate(args.title, args.col || 'planned', args.epic || '—', createPayload);
+            const epicRef = args.epic_id || args.epic || '—';
+            const created = await kanban.doCreate(args.title, args.col || 'planned', epicRef, createPayload);
             const shaped = kanban.shapeTask(created, { view: 'full' });
             const warnings = kanban.createFieldWarnings(createPayload);
             result = warnings.length > 0
               ? { ...shaped, warnings, missing_recommended: kanban.missingRecommendedCreateFields(createPayload) }
               : shaped;
+            break;
+          }
+
+          case 'epic_create': {
+            const epicPayload = {
+              description: args.description,
+              goals: args.goals,
+              in_scope: args.in_scope,
+              out_of_scope: args.out_of_scope,
+              notes: args.notes
+            };
+            const createdEpic = await kanban.doCreateEpic(args.title, epicPayload);
+            const shapedEpic = kanban.shapeEpic(createdEpic, [], { view: 'full' });
+            const epicWarnings = kanban.createEpicFieldWarnings(epicPayload);
+            result = epicWarnings.length > 0
+              ? {
+                ...shapedEpic,
+                warnings: epicWarnings,
+                missing_recommended: kanban.missingRecommendedEpicCreateFields(epicPayload)
+              }
+              : shapedEpic;
+            break;
+          }
+
+          case 'epic_update': {
+            const epicId = args.epic_id || args.epic;
+            if (!epicId) {
+              throw invalidRequest(
+                "epic_id is required for 'epic_update'",
+                'Provide an epic id like E001',
+                { action }
+              );
+            }
+            const epicPatch = args.patch ? { ...args.patch } : {};
+            if (args.title !== undefined) epicPatch.title = args.title;
+            if (args.description !== undefined) epicPatch.description = args.description;
+            if (args.goals !== undefined) epicPatch.goals = args.goals;
+            if (args.in_scope !== undefined) epicPatch.in_scope = args.in_scope;
+            if (args.out_of_scope !== undefined) epicPatch.out_of_scope = args.out_of_scope;
+            if (args.notes !== undefined) epicPatch.notes = args.notes;
+            const updatedEpic = await kanban.updateEpicEntity(epicId, epicPatch);
+            if (returnShape === 'none') {
+              result = { ok: true, epic_id: updatedEpic.id };
+            } else if (returnShape === 'summary') {
+              result = kanban.shapeEpic(updatedEpic, await kanban.allTasks(), { view: 'summary' });
+            } else {
+              result = kanban.shapeEpic(updatedEpic, await kanban.allTasks(), { view: 'full' });
+            }
             break;
           }
 
@@ -585,7 +687,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             if (args.test_cases !== undefined) patch.test_cases = args.test_cases;
             if (args.subtasks !== undefined) patch.subtasks = args.subtasks;
             if (args.notes !== undefined) patch.notes = args.notes;
-            if (args.epic !== undefined) patch.epic_group = args.epic;
+            if (args.epic_id !== undefined) patch.epic_id = args.epic_id;
+            else if (args.epic !== undefined) patch.epic = args.epic;
             if (args.col !== undefined) patch.column = args.col;
             const updated = await kanban.updateTask(args.task_id, patch);
             result = formatTaskResult(updated, returnShape);
@@ -620,7 +723,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           default:
             throw invalidRequest(
               `Unknown action: ${action}`,
-              'Use create, move, update, plan_create, plan_advance, plan_evidence, plan_done, or plan_status',
+              'Use create, move, update, epic_create, epic_update, plan_create, plan_advance, plan_evidence, plan_done, or plan_status',
               { action }
             );
         }

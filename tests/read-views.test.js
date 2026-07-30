@@ -24,9 +24,11 @@ async function run() {
   const summary = kanban.shapeTask(task, { view: 'summary' });
   assert.deepStrictEqual(
     Object.keys(summary),
-    ['task_number', 'title', 'column', 'epic_group', 'created', 'progress'],
+    ['task_number', 'title', 'column', 'epic_id', 'epic_group', 'created', 'progress'],
     'summary view should only expose compact fields'
   );
+  assert.ok(summary.epic_id, 'create with epic label should link epic_id');
+  assert.strictEqual(summary.epic_group, 'Phase 1');
 
   const planning = kanban.shapeTask(task, { view: 'planning' });
   assert.strictEqual(planning.description, 'Planning context');

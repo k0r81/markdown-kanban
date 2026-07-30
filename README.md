@@ -31,8 +31,13 @@ kanban serve
 # List all tasks
 kanban list --json
 
-# Add a task
-kanban add "My task" --col planned --epic "Phase 1"
+# Add an epic (initiative container), then a task under it
+kanban epic add "Phase 1" --description "Why this initiative" --goals "Ship X"
+kanban add "My task" --col planned --epic E001
+
+# List epics / show epic with child rollup
+kanban epic list --json
+kanban epic show E001
 
 # Show details
 kanban show 001
@@ -43,6 +48,16 @@ kanban move 001 active
 # Update subtasks in one call
 kanban update 001 '{"subtasks":[{"done":true,"text":"Research"},{"done":false,"text":"Implementation"}]}'
 ```
+
+### Hierarchy
+
+| Level | What | Storage |
+|-------|------|---------|
+| **Epic** | Initiative context (description, goals) | `backlog/epics/E001.json` |
+| **Task** | Kanban card (column, AC, plan) | `backlog/{col}/001.json` |
+| **Subtask** | Checklist / plan steps | `subtasks[]` on task |
+
+Epic status is **derived** from child task columns (not a board column).
 
 ### Columns
 
@@ -163,7 +178,7 @@ kanban serve
 
 ```js
 const kanban = require('kanbango');
-const tasks = await kanban.allEpics();
+const tasks = await kanban.allTasks();
 ```
 
 ## Requirements

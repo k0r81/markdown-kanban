@@ -67,7 +67,7 @@ async function run() {
   assert.strictEqual(typeof summary.text, 'string', 'kanban_read should always return textual content');
   assert.deepStrictEqual(
     Object.keys(summary.parsed),
-    ['task_number', 'title', 'column', 'epic_group', 'created', 'progress'],
+    ['task_number', 'title', 'column', 'epic_id', 'epic_group', 'created', 'progress'],
     'kanban_read summary view should be compact'
   );
 
@@ -123,7 +123,7 @@ async function run() {
   assert.strictEqual(fullCreate.parsed.warnings, undefined, 'full create should not warn');
   assert.strictEqual(fullCreate.parsed.missing_recommended, undefined);
 
-  const tasksAfterCreate = await kanban.allEpics();
+  const tasksAfterCreate = await kanban.allTasks();
   assert.strictEqual(
     tasksAfterCreate.filter((taskItem) => taskItem.title === 'Created via MCP').length,
     1,

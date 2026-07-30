@@ -6,8 +6,11 @@ This document provides build commands, testing procedures, and code style guidel
 
 Source of truth: `agent-playbook.js` (also MCP tool descriptions + `kanban_read` `operation=help`).
 
+- hierarchy: epic (context) → task (work+plan) → subtasks (steps)
 - list: `col` filter, `view=summary`; keep `task_id`s; no full-board re-list after every write
+- list_epics / show_epic for initiatives; filter tasks with `epic=E001`
 - show: `view=execution` while coding; `full` only if needed
+- epic_create with description/goals; create tasks with `epic=E001` (prefer id)
 - create once with `description`, `specs`, `in_scope`, `out_of_scope`, `acceptance_criteria`
 - move/update: `return=none`; subtasks = full array replace (no toggle)
 - non-trivial work: `plan_create` → `plan_advance` → `plan_evidence` (real tests, truncated logs) → `plan_done`

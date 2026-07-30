@@ -99,7 +99,8 @@ async function cliInit() {
         + '- `active/`  — w trakcie (max 1-2)\n'
         + '- `planned/` — zaplanowane\n'
         + '- `icebox/`  — zamrozone / nice-to-have\n'
-        + '- `done/`    — ukonczone\n',
+        + '- `done/`    — ukonczone\n'
+        + '- `epics/`   — first-class epic containers (context for initiatives)\n',
       'utf-8'
     );
   }
@@ -145,13 +146,14 @@ async function cliMcpInit(options) {
 }
 
 async function cliList(colFilter, epicFilter, asJson) {
-  let tasks = await kanban.allEpics();
+  await kanban.migrateEpicGroups();
+  let tasks = await kanban.allTasks();
 
   if (colFilter) {
     tasks = tasks.filter((task) => task.column === colFilter);
   }
   if (epicFilter) {
-    tasks = tasks.filter((task) => task.epic_group === epicFilter);
+    tasks = tasks.filter((task) => kanban.taskMatchesEpicFilter(task, epicFilter));
   }
 
   if (asJson) {
@@ -168,8 +170,11 @@ async function cliList(colFilter, epicFilter, asJson) {
     const progress = kanban.getProgress(task);
     const prog = progress.total ? `${progress.done}/${progress.total}` : '—';
     const title = displayTitle(task).substring(0, 42);
+    const epicLabel = task.epic_id
+      ? `${task.epic_id}:${task.epic_group}`
+      : task.epic_group;
     console.log(
-      `  ${task.column.padEnd(8)}  ${shortId(task.id).padEnd(8)}  ${title.padEnd(43)}  ${prog.padStart(5)}  [${task.epic_group}]`
+      `  ${task.column.padEnd(8)}  ${shortId(task.id).padEnd(8)}  ${title.padEnd(43)}  ${prog.padStart(5)}  [${epicLabel}]`
     );
   }
 }
@@ -181,7 +186,7 @@ async function cliShow(taskId) {
     console.log(`Plik:    ${taskFilePath(task)}`);
     console.log(`Tytuł:   ${displayTitle(task)}`);
     console.log(`Kolumna: ${task.column}`);
-    console.log(`Epik:    ${task.epic_group}`);
+    console.log(`Epik:    ${task.epic_id ? `${task.epic_id} (${task.epic_group})` : task.epic_group}`);
     console.log(`Worzono: ${task.created || '—'}`);
 
     if (task.description) {
@@ -196,6 +201,64 @@ async function cliShow(taskId) {
         console.log(`  [${i}] [${mark}] ${subtask.text}`);
       }
     }
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function cliEpicList(asJson) {
+  await kanban.migrateEpicGroups();
+  const tasks = await kanban.allTasks();
+  const epics = await kanban.listEpicEntities();
+  const shaped = epics.map((epic) => kanban.shapeEpic(epic, tasks, { view: 'summary' }));
+
+  if (asJson) {
+    console.log(JSON.stringify(shaped, null, 2));
+    return;
+  }
+
+  if (shaped.length === 0) {
+    console.log('(brak epików)');
+    return;
+  }
+
+  for (const epic of shaped) {
+    const p = epic.progress || {};
+    console.log(
+      `  ${epic.id.padEnd(6)}  ${epic.status.padEnd(8)}  ${String(epic.title).substring(0, 40).padEnd(40)}  ${p.tasks_done || 0}/${p.tasks_total || 0} tasks`
+    );
+  }
+}
+
+async function cliEpicShow(epicId) {
+  try {
+    await kanban.migrateEpicGroups();
+    const link = await kanban.resolveEpicRef(epicId, { createIfMissing: false });
+    const epic = await kanban.getEpicEntity(link.epic_id);
+    const tasks = await kanban.allTasks();
+    const shaped = kanban.shapeEpic(epic, tasks, { view: 'full' });
+    console.log(JSON.stringify(shaped, null, 2));
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function cliEpicAdd(title, options = {}) {
+  try {
+    const epic = await kanban.doCreateEpic(title, options);
+    console.log(`✓ Epic ${epic.id}: ${epic.title}`);
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function cliEpicUpdate(epicId, patch) {
+  try {
+    const epic = await kanban.updateEpicEntity(epicId, patch);
+    console.log(`✓ Epic ${epic.id} updated`);
   } catch (error) {
     console.error(`✗ ${error.message}`);
     process.exit(1);
@@ -238,29 +301,87 @@ async function serveWeb(port) {
       }
 
       if (requestPath === '/api/board') {
-        const tasks = await kanban.allEpics();
+        await kanban.migrateEpicGroups();
+        const tasks = await kanban.allTasks();
         sendJson(res, 200, tasks);
+        return;
+      }
+
+      if (requestPath === '/api/epics' && req.method === 'GET') {
+        await kanban.migrateEpicGroups();
+        const tasks = await kanban.allTasks();
+        const epics = await kanban.listEpicEntities();
+        sendJson(res, 200, epics.map((epic) => kanban.shapeEpic(epic, tasks, { view: 'full' })));
         return;
       }
 
       if (requestPath === '/api/epics' && req.method === 'POST') {
         const body = await readBody(req);
-        const task = await kanban.doCreate(body.title || '', body.column || 'planned', body.epic_group || '—', {
-          description: body.description,
-          specs: body.specs,
-          in_scope: body.in_scope,
-          out_of_scope: body.out_of_scope,
-          acceptance_criteria: body.acceptance_criteria,
-          test_cases: body.test_cases,
-          subtasks: body.subtasks,
-          notes: body.notes
-        });
+        // Real epic container when no task column is provided.
+        if (body.column === undefined && body.as_task !== true) {
+          const epic = await kanban.doCreateEpic(body.title || '', {
+            description: body.description,
+            goals: body.goals,
+            in_scope: body.in_scope,
+            out_of_scope: body.out_of_scope,
+            notes: body.notes
+          });
+          sendJson(res, 201, kanban.shapeEpic(epic, [], { view: 'full' }));
+          return;
+        }
+
+        const task = await kanban.doCreate(
+          body.title || '',
+          body.column || 'planned',
+          body.epic_id || body.epic || body.epic_group || '—',
+          {
+            description: body.description,
+            specs: body.specs,
+            in_scope: body.in_scope,
+            out_of_scope: body.out_of_scope,
+            acceptance_criteria: body.acceptance_criteria,
+            test_cases: body.test_cases,
+            subtasks: body.subtasks,
+            notes: body.notes
+          }
+        );
+        sendJson(res, 201, task);
+        return;
+      }
+
+      if (requestPath === '/api/tasks' && req.method === 'POST') {
+        const body = await readBody(req);
+        const task = await kanban.doCreate(
+          body.title || '',
+          body.column || 'planned',
+          body.epic_id || body.epic || body.epic_group || '—',
+          {
+            description: body.description,
+            specs: body.specs,
+            in_scope: body.in_scope,
+            out_of_scope: body.out_of_scope,
+            acceptance_criteria: body.acceptance_criteria,
+            test_cases: body.test_cases,
+            subtasks: body.subtasks,
+            notes: body.notes
+          }
+        );
         sendJson(res, 201, task);
         return;
       }
 
       if (req.method === 'PATCH') {
-        const moveMatch = requestPath.match(/^\/api\/epics\/([^/]+)\/move$/);
+        const epicUpdateMatch = requestPath.match(/^\/api\/epic-entities\/([^/]+)$/);
+        if (epicUpdateMatch) {
+          const body = await readBody(req);
+          const patch = body.patch ? { ...body.patch } : { ...body };
+          delete patch.patch;
+          const epic = await kanban.updateEpicEntity(epicUpdateMatch[1], patch);
+          sendJson(res, 200, kanban.shapeEpic(epic, await kanban.allTasks(), { view: 'full' }));
+          return;
+        }
+
+        const moveMatch = requestPath.match(/^\/api\/(?:epics|tasks)\/([^/]+)\/move$/);
         if (moveMatch) {
           const taskId = moveMatch[1];
           const body = await readBody(req);
@@ -269,7 +390,7 @@ async function serveWeb(port) {
           return;
         }
 
-        const toggleMatch = requestPath.match(/^\/api\/epics\/([^/]+)\/tasks\/(\d+)$/);
+        const toggleMatch = requestPath.match(/^\/api\/(?:epics|tasks)\/([^/]+)\/tasks\/(\d+)$/);
         if (toggleMatch) {
           const taskId = toggleMatch[1];
           const idx = parseInt(toggleMatch[2], 10);
@@ -294,7 +415,7 @@ async function serveWeb(port) {
           return;
         }
 
-        const updateMatch = requestPath.match(/^\/api\/epics\/([^/]+)$/);
+        const updateMatch = requestPath.match(/^\/api\/(?:epics|tasks)\/([^/]+)$/);
         if (updateMatch) {
           const taskId = updateMatch[1];
           const body = await readBody(req);
@@ -309,7 +430,9 @@ async function serveWeb(port) {
           if (body.test_cases !== undefined) patch.test_cases = body.test_cases;
           if (body.subtasks !== undefined) patch.subtasks = body.subtasks;
           if (body.notes !== undefined) patch.notes = body.notes;
-          if (body.epic_group !== undefined) patch.epic_group = body.epic_group;
+          if (body.epic_id !== undefined) patch.epic_id = body.epic_id;
+          else if (body.epic !== undefined) patch.epic = body.epic;
+          else if (body.epic_group !== undefined) patch.epic_group = body.epic_group;
 
           const task = await kanban.updateTask(taskId, patch);
           sendJson(res, 200, task);
@@ -506,6 +629,26 @@ async function main() {
     }
 
     await cliList(colFilter, epicFilter, asJson);
+  } else if (cmd === 'epic') {
+    const sub = args[1];
+    if (sub === 'list') {
+      await cliEpicList(args.includes('--json'));
+    } else if (sub === 'show' && args[2]) {
+      await cliEpicShow(args[2]);
+    } else if (sub === 'add' && args[2]) {
+      let description = '';
+      let goals = '';
+      for (let i = 3; i < args.length; i++) {
+        if (args[i] === '--description' && args[i + 1]) description = args[++i];
+        else if (args[i] === '--goals' && args[i + 1]) goals = args[++i];
+      }
+      await cliEpicAdd(args[2], { description, goals });
+    } else if (sub === 'update' && args[2] && args[3]) {
+      await cliEpicUpdate(args[2], parseJsonPayload(args[3]));
+    } else {
+      console.error('Usage: kanban epic list|show|add|update ...');
+      process.exit(1);
+    }
   } else if (cmd === 'show' && args[1]) {
     await cliShow(args[1]);
   } else if (cmd === 'move' && args[1] && args[2]) {

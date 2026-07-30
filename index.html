@@ -529,29 +529,34 @@ const COL_DEFS = [
   { id: "done",    label: "✅ Done",    icon: "✅" },
 ];
 
-let allEpics   = [];
+let allTasks   = [];
+let allEpicEntities = [];
 let colCounts  = {};
 let collapsed  = new Set();
 let expanded   = new Set();
 let editingId  = null;
-let dirtyEdits = {}; // epicId -> editable task draft
+let dirtyEdits = {}; // taskId -> editable task draft
 
 // ── Load & render ─────────────────────────────────────────────────────────────
 
 async function load() {
-  const res = await fetch("/api/board");
-  allEpics = await res.json();
+  const [boardRes, epicsRes] = await Promise.all([
+    fetch("/api/board"),
+    fetch("/api/epics")
+  ]);
+  allTasks = await boardRes.json();
+  allEpicEntities = epicsRes.ok ? await epicsRes.json() : [];
   render();
 }
 
 function render() {
   colCounts = {};
   COL_DEFS.forEach(c => (colCounts[c.id] = 0));
-  allEpics.forEach(e => { if (colCounts[e.column] !== undefined) colCounts[e.column]++; });
+  allTasks.forEach(e => { if (colCounts[e.column] !== undefined) colCounts[e.column]++; });
 
   // Header stats
-  const total = allEpics.length;
-  const done  = allEpics.filter(e => e.column === "done").length;
+  const total = allTasks.length;
+  const done  = allTasks.filter(e => e.column === "done").length;
   document.getElementById("hstats").textContent = `${done}/${total} done`;
 
   // Col headers
@@ -567,59 +572,82 @@ function render() {
   // Swimlanes
   const sl = document.getElementById("swimlanes");
   sl.innerHTML = "";
-  groupEpics(allEpics).forEach(g => sl.appendChild(renderSwimlane(g)));
+  groupTasks(allTasks).forEach(g => sl.appendChild(renderSwimlane(g)));
 }
 
-function groupEpics(epics) {
+function groupTasks(tasks) {
   const map = new Map();
-  epics.forEach(e => {
-    const g = e.epic_group || "—";
-    if (!map.has(g)) map.set(g, []);
-    map.get(g).push(e);
+  tasks.forEach(t => {
+    const key = t.epic_id || "—";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(t);
   });
-  // Sort: known phases first, "—" last
   return [...map.entries()]
     .sort(([a], [b]) => a === "—" ? 1 : b === "—" ? -1 : a.localeCompare(b, "pl"))
-    .map(([name, epics]) => ({ name, epics }));
+    .map(([key, laneTasks]) => {
+      const entity = allEpicEntities.find(e => e.id === key);
+      const name = key === "—"
+        ? "—"
+        : (entity ? entity.title : (laneTasks[0] && laneTasks[0].epic_group) || key);
+      return {
+        key,
+        name,
+        epicId: key === "—" ? null : key,
+        status: entity ? entity.status : null,
+        description: entity ? entity.description : "",
+        goals: entity ? entity.goals : "",
+        tasks: laneTasks
+      };
+    });
 }
 
 // ── Swimlane ──────────────────────────────────────────────────────────────────
 
-function renderSwimlane({ name, epics }) {
-  const isCollapsed = collapsed.has(name);
+function renderSwimlane({ key, name, epicId, status, description, goals, tasks }) {
+  const isCollapsed = collapsed.has(key);
 
   const wrap = el("div", "swimlane");
 
   // Header
   const hdr = el("div", `sl-header${isCollapsed ? " collapsed" : ""}`);
-  const totalTasks = epics.reduce((s, e) => s + e.subtasks.length, 0);
-  const doneTasks  = epics.reduce((s, e) => s + e.subtasks.filter(t => t.done).length, 0);
+  const totalTasks = tasks.reduce((s, e) => s + (e.subtasks || []).length, 0);
+  const doneTasks  = tasks.reduce((s, e) => s + (e.subtasks || []).filter(t => t.done).length, 0);
   const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : null;
+  const cardsDone = tasks.filter(t => t.column === "done").length;
+  const statusBadge = status ? `<span class="sl-cnt" title="derived status">${escHtml(status)}</span>` : "";
 
   hdr.innerHTML = `
     <span class="sl-arrow">▼</span>
-    <span class="sl-name">${escHtml(name === "—" ? "Uncategorized (no epic)" : name)}</span>
-    <span class="sl-cnt">${epics.length}</span>
-    ${pct !== null ? `<span class="sl-progress" style="margin-left:auto">${pct}% tasks done</span>` : ""}
+    <span class="sl-name">${escHtml(name === "—" ? "Uncategorized (no epic)" : name)}${epicId ? ` <small style="opacity:.6">${escHtml(epicId)}</small>` : ""}</span>
+    <span class="sl-cnt">${tasks.length} cards · ${cardsDone} done</span>
+    ${statusBadge}
+    ${pct !== null ? `<span class="sl-progress" style="margin-left:auto">${pct}% subtasks</span>` : ""}
   `;
   hdr.onclick = () => {
-    if (collapsed.has(name)) collapsed.delete(name);
-    else collapsed.add(name);
+    if (collapsed.has(key)) collapsed.delete(key);
+    else collapsed.add(key);
     render();
   };
   wrap.appendChild(hdr);
+
+  if (!isCollapsed && (description || goals)) {
+    const meta = el("div", "sl-body");
+    meta.style.cssText = "display:block;padding:6px 12px 0;font-size:12px;opacity:.85";
+    meta.innerHTML = `${goals ? `<div><strong>Goals:</strong> ${escHtml(goals)}</div>` : ""}${description ? `<div>${escHtml(description)}</div>` : ""}`;
+    wrap.appendChild(meta);
+  }
 
   // Body
   const body = el("div", `sl-body${isCollapsed ? " hidden" : ""}`);
   COL_DEFS.forEach(col => {
     const lane = el("div", `lane col-${col.id}`);
-    epics.filter(e => e.column === col.id).forEach(e => lane.appendChild(renderCard(e, col.id)));
+    tasks.filter(e => e.column === col.id).forEach(e => lane.appendChild(renderCard(e, col.id)));
     // Add button only in non-done columns
     if (col.id !== "done") {
       const addBtn = document.createElement("button");
       addBtn.className = "lane-add";
       addBtn.textContent = "+ Add here";
-      addBtn.onclick = e => { e.stopPropagation(); showLaneAdd(lane, col.id, name, addBtn); };
+      addBtn.onclick = e => { e.stopPropagation(); showLaneAdd(lane, col.id, epicId || name, addBtn); };
       lane.appendChild(addBtn);
     }
     body.appendChild(lane);
@@ -931,7 +959,7 @@ async function saveEdit(epicId) {
   if (!dirty) { editingId = null; render(); return; }
 
   const body = {};
-  const epic = allEpics.find(e => e.id === epicId);
+  const epic = allTasks.find(e => e.id === epicId);
   if (epic) {
     const origTitle = epic.title.replace(/^[\w.-]+:\s*/, "");
     if (dirty.title !== origTitle) body.title = dirty.title;
@@ -1007,13 +1035,15 @@ function showLaneAdd(lane, colId, groupName, addBtn) {
     if (!title) return;
     inp.disabled = true;
     description.disabled = true;
-    const res = await fetch("/api/epics", {
+    const epicRef = groupName === "—" ? "" : groupName;
+    const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title,
         column: colId,
-        epic_group: groupName === "—" ? "" : groupName,
+        epic: epicRef,
+        epic_id: epicRef && /^E\d+/i.test(epicRef) ? epicRef : undefined,
         description: description.value.trim()
       }),
     });
@@ -1058,10 +1088,10 @@ async function submitNew() {
   const group = document.getElementById("ne-group").value.trim();
   if (!title) { document.getElementById("ne-title").focus(); return; }
 
-  const res = await fetch("/api/epics", {
+  const res = await fetch("/api/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, column: col, epic_group: group || "—" }),
+    body: JSON.stringify({ title, column: col, epic: group || "—" }),
   });
   if (res.ok) {
     toast("Task added ✓");

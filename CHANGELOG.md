@@ -5,6 +5,24 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-07-30
+
+### Added
+- First-class epic containers under `backlog/epics/E00N.json` (description, goals, in/out scope, notes)
+- Task field `epic_id` with denormalized `epic_group` title for lists/GUI
+- Derived epic status/progress from child task columns (no epic board column)
+- MCP: `list_epics`, `show_epic`, `epic_create`, `epic_update`
+- CLI: `kanban epic list|show|add|update`
+- HTTP: `GET/POST /api/epics` for real epics; `POST /api/tasks` for tasks (legacy `/api/epics` + `column` still creates tasks)
+- Auto-migration of legacy `epic_group` string labels into epic entities
+- GUI swimlanes group by `epic_id` and show epic context
+- Regression tests in `tests/epics.test.js`
+
+### Changed
+- Hierarchy documented for agents: epic → task → subtasks
+- Task summary view includes `epic_id`
+- Agent playbook includes epic discovery/create rules
+
 ## [3.0.2] - 2026-07-29
 
 ### Added
