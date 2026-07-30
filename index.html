@@ -180,6 +180,89 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   font-size: 11px;
   color: var(--muted);
 }
+.sl-edit-btn {
+  border: none;
+  background: #e2e8f0;
+  color: var(--muted);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: 4px;
+}
+.sl-edit-btn:hover { background: #cbd5e1; color: var(--text); }
+
+/* ── Epic detail panel (swimlane context) ── */
+.sl-epic-detail {
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #fafbfc;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  font-size: 12px;
+}
+.sl-epic-detail.full-width { grid-template-columns: 1fr; }
+.sl-epic-block { min-width: 0; }
+.sl-epic-block.span2 { grid-column: 1 / -1; }
+.sl-epic-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.sl-epic-text {
+  color: var(--text);
+  white-space: pre-wrap;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.sl-epic-text.empty { color: var(--muted); font-style: italic; }
+.sl-epic-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text);
+  line-height: 1.45;
+}
+.sl-epic-list.out { color: #94a3b8; }
+.sl-epic-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.sl-epic-edit-grid .span2 { grid-column: 1 / -1; }
+.sl-epic-edit-grid label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.sl-epic-edit-grid input,
+.sl-epic-edit-grid textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  box-sizing: border-box;
+  resize: vertical;
+}
+.sl-epic-edit-grid textarea { min-height: 52px; }
+.sl-epic-edit-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
 
 /* ── Swimlane body grid ── */
 .sl-body {
@@ -487,8 +570,28 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   <h1>Donna Kanban</h1>
   <span class="hstats" id="hstats">—</span>
   <span class="hspacer"></span>
+  <button class="btn-new" id="btn-new-epic" onclick="toggleNewEpicForm()" style="background:#64748b">+ New epic</button>
   <button class="btn-new" id="btn-new" onclick="toggleNewForm()">+ New task</button>
 </header>
+
+<div class="new-epic-strip" id="new-epic-strip">
+  <div class="ne-field">
+    <div class="ne-label">Epic title</div>
+    <input class="ne-input ne-title" id="nx-title" placeholder="Initiative name…" autocomplete="off">
+  </div>
+  <div class="ne-field" style="flex:1;min-width:200px">
+    <div class="ne-label">Description</div>
+    <input class="ne-input" id="nx-description" placeholder="Context for agents…" autocomplete="off" style="width:100%">
+  </div>
+  <div class="ne-field" style="flex:1;min-width:160px">
+    <div class="ne-label">Goals</div>
+    <input class="ne-input" id="nx-goals" placeholder="Outcome…" autocomplete="off" style="width:100%">
+  </div>
+  <div class="ne-buttons">
+    <button class="btn-sm btn-confirm" onclick="submitNewEpic()">Add epic</button>
+    <button class="btn-sm btn-cancel" onclick="toggleNewEpicForm()">Cancel</button>
+  </div>
+</div>
 
 <div class="new-epic-strip" id="new-strip">
   <div class="ne-field">
@@ -506,7 +609,8 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   </div>
   <div class="ne-field">
     <div class="ne-label">Epic</div>
-    <input class="ne-input ne-group" id="ne-group" placeholder="Epic group (optional)…" autocomplete="off">
+    <input class="ne-input ne-group" id="ne-group" list="epic-datalist" placeholder="E001 or title…" autocomplete="off">
+    <datalist id="epic-datalist"></datalist>
   </div>
   <div class="ne-buttons">
     <button class="btn-sm btn-confirm" onclick="submitNew()">Add</button>
@@ -536,6 +640,8 @@ let collapsed  = new Set();
 let expanded   = new Set();
 let editingId  = null;
 let dirtyEdits = {}; // taskId -> editable task draft
+let editingEpicId = null;
+let dirtyEpicEdits = {}; // epicId -> draft
 
 // ── Load & render ─────────────────────────────────────────────────────────────
 
@@ -546,7 +652,16 @@ async function load() {
   ]);
   allTasks = await boardRes.json();
   allEpicEntities = epicsRes.ok ? await epicsRes.json() : [];
+  refreshEpicDatalist();
   render();
+}
+
+function refreshEpicDatalist() {
+  const list = document.getElementById("epic-datalist");
+  if (!list) return;
+  list.innerHTML = allEpicEntities.map(e =>
+    `<option value="${escHtml(e.id)}">${escHtml(e.title)}</option>`
+  ).join("");
 }
 
 function render() {
@@ -557,7 +672,8 @@ function render() {
   // Header stats
   const total = allTasks.length;
   const done  = allTasks.filter(e => e.column === "done").length;
-  document.getElementById("hstats").textContent = `${done}/${total} done`;
+  const epicN = allEpicEntities.length;
+  document.getElementById("hstats").textContent = `${done}/${total} done · ${epicN} epics`;
 
   // Col headers
   const hdr = document.getElementById("col-headers");
@@ -582,10 +698,15 @@ function groupTasks(tasks) {
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(t);
   });
+  // Include epics that have no tasks yet
+  allEpicEntities.forEach(e => {
+    if (!map.has(e.id)) map.set(e.id, []);
+  });
+
   return [...map.entries()]
     .sort(([a], [b]) => a === "—" ? 1 : b === "—" ? -1 : a.localeCompare(b, "pl"))
     .map(([key, laneTasks]) => {
-      const entity = allEpicEntities.find(e => e.id === key);
+      const entity = allEpicEntities.find(e => e.id === key) || null;
       const name = key === "—"
         ? "—"
         : (entity ? entity.title : (laneTasks[0] && laneTasks[0].epic_group) || key);
@@ -593,18 +714,191 @@ function groupTasks(tasks) {
         key,
         name,
         epicId: key === "—" ? null : key,
-        status: entity ? entity.status : null,
-        description: entity ? entity.description : "",
-        goals: entity ? entity.goals : "",
+        entity,
         tasks: laneTasks
       };
     });
 }
 
+function epicListHtml(items, emptyLabel, extraClass) {
+  if (!items || items.length === 0) {
+    return `<div class="sl-epic-text empty">${escHtml(emptyLabel)}</div>`;
+  }
+  return `<ul class="sl-epic-list${extraClass ? " " + extraClass : ""}">${
+    items.map(i => `<li>${escHtml(i)}</li>`).join("")
+  }</ul>`;
+}
+
+function renderEpicDetailView(entity) {
+  const panel = el("div", "sl-epic-detail");
+
+  const goals = el("div", "sl-epic-block span2");
+  goals.innerHTML = `<div class="sl-epic-label">Goals</div>${
+    entity.goals
+      ? `<div class="sl-epic-text">${escHtml(entity.goals)}</div>`
+      : `<div class="sl-epic-text empty">No goals set</div>`
+  }`;
+  panel.appendChild(goals);
+
+  const desc = el("div", "sl-epic-block span2");
+  desc.innerHTML = `<div class="sl-epic-label">Description</div>${
+    entity.description
+      ? `<div class="sl-epic-text">${escHtml(entity.description)}</div>`
+      : `<div class="sl-epic-text empty">No description</div>`
+  }`;
+  panel.appendChild(desc);
+
+  const inScope = el("div", "sl-epic-block");
+  inScope.innerHTML = `<div class="sl-epic-label">In scope</div>${
+    epicListHtml(entity.in_scope, "—", "")
+  }`;
+  panel.appendChild(inScope);
+
+  const outScope = el("div", "sl-epic-block");
+  outScope.innerHTML = `<div class="sl-epic-label">Out of scope</div>${
+    epicListHtml(entity.out_of_scope, "—", "out")
+  }`;
+  panel.appendChild(outScope);
+
+  if (entity.notes) {
+    const notes = el("div", "sl-epic-block span2");
+    notes.innerHTML = `<div class="sl-epic-label">Notes</div><div class="sl-epic-text">${escHtml(entity.notes)}</div>`;
+    panel.appendChild(notes);
+  }
+
+  const p = entity.progress || {};
+  const rollup = el("div", "sl-epic-block span2");
+  rollup.innerHTML = `<div class="sl-epic-label">Rollup</div>
+    <div class="sl-epic-text">status: <strong>${escHtml(entity.status || "—")}</strong>
+    · total ${p.tasks_total || 0}
+    · active ${p.tasks_active || 0}
+    · planned ${p.tasks_planned || 0}
+    · icebox ${p.tasks_icebox || 0}
+    · done ${p.tasks_done || 0}</div>`;
+  panel.appendChild(rollup);
+
+  return panel;
+}
+
+function renderEpicDetailEdit(entity) {
+  const dirty = dirtyEpicEdits[entity.id] || {
+    title: entity.title || "",
+    description: entity.description || "",
+    goals: entity.goals || "",
+    in_scope: (entity.in_scope || []).join("\n"),
+    out_of_scope: (entity.out_of_scope || []).join("\n"),
+    notes: entity.notes || ""
+  };
+  dirtyEpicEdits[entity.id] = dirty;
+
+  const panel = el("div", "sl-epic-detail full-width");
+  panel.onclick = e => e.stopPropagation();
+
+  const grid = el("div", "sl-epic-edit-grid");
+
+  const titleWrap = el("div", "span2");
+  titleWrap.innerHTML = `<label>Title</label>`;
+  const titleInp = document.createElement("input");
+  titleInp.value = dirty.title;
+  titleInp.oninput = () => { dirty.title = titleInp.value; dirtyEpicEdits[entity.id] = dirty; };
+  titleWrap.appendChild(titleInp);
+  grid.appendChild(titleWrap);
+
+  const goalsWrap = el("div", "span2");
+  goalsWrap.innerHTML = `<label>Goals</label>`;
+  const goalsTa = document.createElement("textarea");
+  goalsTa.value = dirty.goals;
+  goalsTa.placeholder = "Outcome one-liner…";
+  goalsTa.oninput = () => { dirty.goals = goalsTa.value; dirtyEpicEdits[entity.id] = dirty; };
+  goalsWrap.appendChild(goalsTa);
+  grid.appendChild(goalsWrap);
+
+  const descWrap = el("div", "span2");
+  descWrap.innerHTML = `<label>Description</label>`;
+  const descTa = document.createElement("textarea");
+  descTa.value = dirty.description;
+  descTa.placeholder = "Context for agents…";
+  descTa.style.minHeight = "72px";
+  descTa.oninput = () => { dirty.description = descTa.value; dirtyEpicEdits[entity.id] = dirty; };
+  descWrap.appendChild(descTa);
+  grid.appendChild(descWrap);
+
+  const inWrap = el("div", "");
+  inWrap.innerHTML = `<label>In scope (one per line)</label>`;
+  const inTa = document.createElement("textarea");
+  inTa.value = dirty.in_scope;
+  inTa.oninput = () => { dirty.in_scope = inTa.value; dirtyEpicEdits[entity.id] = dirty; };
+  inWrap.appendChild(inTa);
+  grid.appendChild(inWrap);
+
+  const outWrap = el("div", "");
+  outWrap.innerHTML = `<label>Out of scope (one per line)</label>`;
+  const outTa = document.createElement("textarea");
+  outTa.value = dirty.out_of_scope;
+  outTa.oninput = () => { dirty.out_of_scope = outTa.value; dirtyEpicEdits[entity.id] = dirty; };
+  outWrap.appendChild(outTa);
+  grid.appendChild(outWrap);
+
+  const notesWrap = el("div", "span2");
+  notesWrap.innerHTML = `<label>Notes</label>`;
+  const notesTa = document.createElement("textarea");
+  notesTa.value = dirty.notes;
+  notesTa.oninput = () => { dirty.notes = notesTa.value; dirtyEpicEdits[entity.id] = dirty; };
+  notesWrap.appendChild(notesTa);
+  grid.appendChild(notesWrap);
+
+  const actions = el("div", "sl-epic-edit-actions");
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-sm btn-confirm";
+  saveBtn.textContent = "✓ Save epic";
+  saveBtn.onclick = async e => { e.stopPropagation(); await saveEpicEdit(entity.id); };
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-sm btn-cancel";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.onclick = e => {
+    e.stopPropagation();
+    delete dirtyEpicEdits[entity.id];
+    editingEpicId = null;
+    render();
+  };
+  actions.appendChild(saveBtn);
+  actions.appendChild(cancelBtn);
+  grid.appendChild(actions);
+
+  panel.appendChild(grid);
+  return panel;
+}
+
+async function saveEpicEdit(epicId) {
+  const dirty = dirtyEpicEdits[epicId];
+  if (!dirty) { editingEpicId = null; render(); return; }
+  const res = await fetch(`/api/epic-entities/${enc(epicId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: dirty.title.trim(),
+      description: dirty.description,
+      goals: dirty.goals,
+      in_scope: splitLines(dirty.in_scope),
+      out_of_scope: splitLines(dirty.out_of_scope),
+      notes: dirty.notes
+    })
+  });
+  if (res.ok) {
+    delete dirtyEpicEdits[epicId];
+    editingEpicId = null;
+    toast("Epic saved ✓");
+    await load();
+  } else {
+    toast("Epic save failed", true);
+  }
+}
+
 // ── Swimlane ──────────────────────────────────────────────────────────────────
 
-function renderSwimlane({ key, name, epicId, status, description, goals, tasks }) {
+function renderSwimlane({ key, name, epicId, entity, tasks }) {
   const isCollapsed = collapsed.has(key);
+  const isEditingEpic = epicId && editingEpicId === epicId;
 
   const wrap = el("div", "swimlane");
 
@@ -614,27 +908,54 @@ function renderSwimlane({ key, name, epicId, status, description, goals, tasks }
   const doneTasks  = tasks.reduce((s, e) => s + (e.subtasks || []).filter(t => t.done).length, 0);
   const pct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : null;
   const cardsDone = tasks.filter(t => t.column === "done").length;
+  const status = entity ? entity.status : null;
   const statusBadge = status ? `<span class="sl-cnt" title="derived status">${escHtml(status)}</span>` : "";
 
-  hdr.innerHTML = `
+  const left = el("div");
+  left.style.cssText = "display:flex;align-items:center;gap:8px;flex:1;min-width:0";
+  left.innerHTML = `
     <span class="sl-arrow">▼</span>
     <span class="sl-name">${escHtml(name === "—" ? "Uncategorized (no epic)" : name)}${epicId ? ` <small style="opacity:.6">${escHtml(epicId)}</small>` : ""}</span>
     <span class="sl-cnt">${tasks.length} cards · ${cardsDone} done</span>
     ${statusBadge}
-    ${pct !== null ? `<span class="sl-progress" style="margin-left:auto">${pct}% subtasks</span>` : ""}
   `;
-  hdr.onclick = () => {
+  left.onclick = () => {
     if (collapsed.has(key)) collapsed.delete(key);
     else collapsed.add(key);
     render();
   };
+  hdr.appendChild(left);
+
+  if (pct !== null) {
+    const prog = el("span", "sl-progress");
+    prog.textContent = `${pct}% subtasks`;
+    hdr.appendChild(prog);
+  }
+
+  if (epicId && entity) {
+    const editBtn = document.createElement("button");
+    editBtn.className = "sl-edit-btn";
+    editBtn.textContent = isEditingEpic ? "Editing…" : "Edit epic";
+    editBtn.onclick = e => {
+      e.stopPropagation();
+      if (editingEpicId === epicId) {
+        editingEpicId = null;
+        delete dirtyEpicEdits[epicId];
+      } else {
+        editingEpicId = epicId;
+      }
+      if (collapsed.has(key)) collapsed.delete(key);
+      render();
+    };
+    hdr.appendChild(editBtn);
+  }
+
   wrap.appendChild(hdr);
 
-  if (!isCollapsed && (description || goals)) {
-    const meta = el("div", "sl-body");
-    meta.style.cssText = "display:block;padding:6px 12px 0;font-size:12px;opacity:.85";
-    meta.innerHTML = `${goals ? `<div><strong>Goals:</strong> ${escHtml(goals)}</div>` : ""}${description ? `<div>${escHtml(description)}</div>` : ""}`;
-    wrap.appendChild(meta);
+  if (!isCollapsed && entity) {
+    wrap.appendChild(
+      isEditingEpic ? renderEpicDetailEdit(entity) : renderEpicDetailView(entity)
+    );
   }
 
   // Body
@@ -1072,13 +1393,25 @@ function showLaneAdd(lane, colId, groupName, addBtn) {
   inp.focus();
 }
 
-// ── New epic form (header) ────────────────────────────────────────────────────
+// ── New task / epic forms (header) ────────────────────────────────────────────
 
 function toggleNewForm() {
+  const epicStrip = document.getElementById("new-epic-strip");
+  if (epicStrip) epicStrip.classList.remove("open");
   const strip = document.getElementById("new-strip");
   strip.classList.toggle("open");
   if (strip.classList.contains("open")) {
     document.getElementById("ne-title").focus();
+  }
+}
+
+function toggleNewEpicForm() {
+  const taskStrip = document.getElementById("new-strip");
+  if (taskStrip) taskStrip.classList.remove("open");
+  const strip = document.getElementById("new-epic-strip");
+  strip.classList.toggle("open");
+  if (strip.classList.contains("open")) {
+    document.getElementById("nx-title").focus();
   }
 }
 
@@ -1104,10 +1437,37 @@ async function submitNew() {
   }
 }
 
+async function submitNewEpic() {
+  const title = document.getElementById("nx-title").value.trim();
+  const description = document.getElementById("nx-description").value.trim();
+  const goals = document.getElementById("nx-goals").value.trim();
+  if (!title) { document.getElementById("nx-title").focus(); return; }
+
+  const res = await fetch("/api/epics", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, description, goals }),
+  });
+  if (res.ok) {
+    toast("Epic added ✓");
+    document.getElementById("nx-title").value = "";
+    document.getElementById("nx-description").value = "";
+    document.getElementById("nx-goals").value = "";
+    toggleNewEpicForm();
+    await load();
+  } else {
+    toast("Error!", true);
+  }
+}
+
 // Key handler for new form
 document.getElementById("ne-title").addEventListener("keydown", e => {
   if (e.key === "Enter") submitNew();
   if (e.key === "Escape") toggleNewForm();
+});
+document.getElementById("nx-title").addEventListener("keydown", e => {
+  if (e.key === "Enter") submitNewEpic();
+  if (e.key === "Escape") toggleNewEpicForm();
 });
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
