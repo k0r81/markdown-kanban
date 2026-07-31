@@ -249,7 +249,7 @@ Control the web GUI server: start, stop, or check status.
 2. Else `KANBANGO_GUI_PORT` env
 3. Else stable hash of project cwd in range `5510–5999`
 
-If the preferred port is busy, the server picks the next free port. Always trust the returned `url` / `port` (also written to `backlog/.kanbango-gui.json`).
+If the preferred port is busy, the server picks the next free port. Always trust the returned `url` / `port` (also written to `backlog/.kanbango-gui.json`). Responses also include `project` (basename of project cwd, or `KANBANGO_PROJECT_NAME`) so agents and humans can tell boards apart; the GUI tab title and header show the same label.
 
 **Auto-start with MCP:** set `KANBANGO_AUTO_GUI=1` in the MCP server env. GUI starts when MCP starts; use `status` to read the URL.
 

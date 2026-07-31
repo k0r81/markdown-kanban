@@ -5,6 +5,24 @@ All notable changes to kanbango will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [3.2.0] - 2026-07-31
+
+### Added
+- GUI project label: browser tab title, header, port file, and `kanban_gui` start/status include `project` (basename of cwd; override with `KANBANGO_PROJECT_NAME`)
+- Epic field `archived` + status `archived` (overrides derived child rollup)
+- Hard delete: MCP `delete` / `epic_delete` (cascade child tasks), CLI `kanban rm` / `kanban epic rm`, HTTP `DELETE`
+- Archive: MCP `epic_archive` / `epic_unarchive`, CLI `kanban epic archive|unarchive`, HTTP `POST .../archive|unarchive`
+- `list_epics` default live-only (empty|planned|active); `include_archived`, `include_done`, `status` filters
+- Task `list` hides tasks under done/archived epics unless `include_archived`/`include_done` (explicit `epic=` filter still shows them)
+- GUI: Archive/Unarchive/Delete on epic swimlane, Delete on task card, Show archived toggle
+- Tests: `tests/delete-archive.test.js`
+
+### Changed
+- Agent playbook documents cleanup + live-only epic discovery
+- `show` / `show_epic` by id still return archived items (explicit lookup)
+
 ## [3.1.0] - 2026-07-30
 
 ### Added

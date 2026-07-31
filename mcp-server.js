@@ -146,30 +146,42 @@ function formatTaskResult(task, returnShape) {
   return kanban.shapeTask(task, { view: returnShape === 'full' ? 'full' : 'summary' });
 }
 
+function guiIdentity(extra = {}) {
+  const cwd = extra.cwd || process.cwd();
+  return {
+    ...extra,
+    cwd,
+    project: extra.project || guiRegistry.projectLabel(cwd)
+  };
+}
+
 async function startGuiServer(port) {
   if (port !== undefined && port !== null && port !== '' && !normalizePort(port)) {
     throw invalidRequest('Invalid port', 'Use an integer between 1 and 65535', { port });
   }
 
   if (ownsGuiProcess() && guiPort) {
-    return {
+    return guiIdentity({
       status: 'already_running',
       owned: true,
       port: guiPort,
       pid: guiProcess.pid,
       url: `http://localhost:${guiPort}`
-    };
+    });
   }
 
   const existing = await guiRegistry.discoverRunningGui();
   if (existing) {
-    return {
+    return guiIdentity({
       status: 'already_running',
       owned: false,
       port: existing.port,
       pid: existing.pid,
-      url: existing.url
-    };
+      url: existing.url,
+      cwd: existing.cwd,
+      project: existing.project,
+      started_at: existing.started_at
+    });
   }
 
   const desiredPort = guiRegistry.resolvePreferredGuiPort(port);
@@ -194,19 +206,24 @@ async function startGuiServer(port) {
   const ready = await waitForGuiReady(childPid);
   guiPort = ready.port;
 
-  return {
+  return guiIdentity({
     status: 'started',
     owned: true,
     port: ready.port,
     pid: ready.pid,
-    url: ready.url
-  };
+    url: ready.url,
+    cwd: ready.cwd,
+    project: ready.project,
+    started_at: ready.started_at
+  });
 }
 
 async function stopGuiServer() {
   if (ownsGuiProcess()) {
     const port = guiPort;
     const pid = guiProcess.pid;
+    const project = guiRegistry.projectLabel();
+    const cwd = process.cwd();
     guiProcess.kill();
 
     const deadline = Date.now() + 2000;
@@ -219,7 +236,7 @@ async function stopGuiServer() {
     await guiRegistry.clearGuiPortFile({ force: true });
     guiProcess = null;
     guiPort = null;
-    return { status: 'stopping', owned: true, port, pid };
+    return { status: 'stopping', owned: true, port, pid, project, cwd };
   }
 
   guiProcess = null;
@@ -230,44 +247,48 @@ async function stopGuiServer() {
     return { status: 'not_running' };
   }
 
-  return {
-    status: 'external_running',
-    owned: false,
-    port: discovered.port,
-    pid: discovered.pid,
-    url: discovered.url,
-    hint: 'GUI was not started by this MCP process; stop refused. Stop it from the owning terminal or kill that PID manually.'
-  };
-}
-
-async function guiStatus() {
-  if (ownsGuiProcess() && guiPort) {
-    return {
-      status: 'running',
-      owned: true,
-      port: guiPort,
-      pid: guiProcess.pid,
-      url: `http://localhost:${guiPort}`
-    };
-  }
-
-  guiProcess = null;
-  guiPort = null;
-
-  const discovered = await guiRegistry.discoverRunningGui();
-  if (!discovered) {
-    return { status: 'not_running' };
-  }
-
-  return {
+  return guiIdentity({
     status: 'external_running',
     owned: false,
     port: discovered.port,
     pid: discovered.pid,
     url: discovered.url,
     cwd: discovered.cwd,
+    project: discovered.project,
+    started_at: discovered.started_at,
+    hint: 'GUI was not started by this MCP process; stop refused. Stop it from the owning terminal or kill that PID manually.'
+  });
+}
+
+async function guiStatus() {
+  if (ownsGuiProcess() && guiPort) {
+    return guiIdentity({
+      status: 'running',
+      owned: true,
+      port: guiPort,
+      pid: guiProcess.pid,
+      url: `http://localhost:${guiPort}`
+    });
+  }
+
+  guiProcess = null;
+  guiPort = null;
+
+  const discovered = await guiRegistry.discoverRunningGui();
+  if (!discovered) {
+    return { status: 'not_running' };
+  }
+
+  return guiIdentity({
+    status: 'external_running',
+    owned: false,
+    port: discovered.port,
+    pid: discovered.pid,
+    url: discovered.url,
+    cwd: discovered.cwd,
+    project: discovered.project,
     started_at: discovered.started_at
-  };
+  });
 }
 
 const server = new Server(
@@ -314,6 +335,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'Filter list by epic id or title'
             },
+            include_archived: {
+              type: 'boolean',
+              description: 'list/list_epics: include archived epics and their tasks (default false)'
+            },
+            include_done: {
+              type: 'boolean',
+              description: 'list_epics: include status=done epics without archived (default false)'
+            },
+            status: {
+              type: 'string',
+              enum: ['empty', 'planned', 'active', 'done', 'archived'],
+              description: 'list_epics: exact status filter (overrides live-only default)'
+            },
             view: {
               type: 'string',
               enum: READ_VIEWS,
@@ -340,15 +374,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 'create',
                 'move',
                 'update',
+                'delete',
                 'epic_create',
                 'epic_update',
+                'epic_archive',
+                'epic_unarchive',
+                'epic_delete',
                 'plan_create',
                 'plan_advance',
                 'plan_evidence',
                 'plan_done',
                 'plan_status'
               ],
-              description: 'create|move|update daily; epic_create|epic_update for containers; plan_* for multi-step work'
+              description: 'create|move|update|delete daily; epic_create|epic_update|epic_archive|epic_unarchive|epic_delete; plan_* multi-step'
             },
             title: {
               type: 'string',
@@ -367,7 +405,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             epic_id: {
               type: 'string',
-              description: 'Required for epic_update; optional filter/link id'
+              description: 'Required for epic_update|epic_archive|epic_unarchive|epic_delete; optional link id'
             },
             description: {
               type: 'string',
@@ -420,7 +458,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             task_id: {
               type: 'string',
-              description: "Required for move/update/plan_* except plan_create. '014' or '14'."
+              description: "Required for move/update/delete/plan_* except plan_create. '014' or '14'."
             },
             column: {
               type: 'string',
@@ -434,7 +472,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             return: {
               type: 'string',
               enum: ['none', 'summary', 'full'],
-              description: 'move/update/epic_update response size. Prefer none. Default summary. create/epic_create return full once.'
+              description: 'move/update/delete/epic_* response size. Prefer none. Default summary. create/epic_create return full once.'
             },
             index: {
               type: 'integer',
@@ -517,13 +555,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (operation === 'list') {
           await kanban.migrateEpicGroups();
+          const epics = await kanban.listEpicEntities();
           let tasks = await kanban.allTasks();
           if (args.col) {
             tasks = tasks.filter((task) => task.column === args.col);
           }
+          // Explicit epic filter bypasses live-only hide (agent asked for that initiative)
           if (args.epic || args.epic_id) {
             const filter = args.epic_id || args.epic;
             tasks = tasks.filter((task) => kanban.taskMatchesEpicFilter(task, filter));
+          } else {
+            tasks = kanban.filterTasksForList(tasks, epics, {
+              include_archived: args.include_archived,
+              include_done: args.include_done
+            });
           }
 
           result = tasks.map((task) => kanban.shapeTask(task, readOptions));
@@ -544,10 +589,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const epicView = args.view === 'full' || args.view === 'planning' || args.view === 'execution'
             ? (args.view === 'execution' ? 'planning' : args.view)
             : 'summary';
-          result = epics.map((epic) => kanban.shapeEpic(epic, tasks, {
+          const shaped = epics.map((epic) => kanban.shapeEpic(epic, tasks, {
             view: Array.isArray(args.fields) && args.fields.length > 0 ? undefined : epicView,
             fields: args.fields
           }));
+          result = kanban.filterShapedEpics(shaped, {
+            include_archived: args.include_archived,
+            include_done: args.include_done,
+            status: args.status
+          });
         } else if (operation === 'show_epic') {
           const epicRef = args.epic_id || args.epic;
           if (!epicRef) {
@@ -638,6 +688,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             if (args.in_scope !== undefined) epicPatch.in_scope = args.in_scope;
             if (args.out_of_scope !== undefined) epicPatch.out_of_scope = args.out_of_scope;
             if (args.notes !== undefined) epicPatch.notes = args.notes;
+            if (args.patch && args.patch.archived !== undefined) {
+              epicPatch.archived = args.patch.archived;
+            }
             const updatedEpic = await kanban.updateEpicEntity(epicId, epicPatch);
             if (returnShape === 'none') {
               result = { ok: true, epic_id: updatedEpic.id };
@@ -646,6 +699,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             } else {
               result = kanban.shapeEpic(updatedEpic, await kanban.allTasks(), { view: 'full' });
             }
+            break;
+          }
+
+          case 'epic_archive':
+          case 'epic_unarchive': {
+            const epicId = args.epic_id || args.epic;
+            if (!epicId) {
+              throw invalidRequest(
+                `epic_id is required for '${action}'`,
+                'Provide an epic id like E001',
+                { action }
+              );
+            }
+            const toggled = action === 'epic_archive'
+              ? await kanban.archiveEpic(epicId)
+              : await kanban.unarchiveEpic(epicId);
+            if (returnShape === 'none') {
+              result = { ok: true, epic_id: toggled.id, archived: toggled.archived };
+            } else if (returnShape === 'summary') {
+              result = kanban.shapeEpic(toggled, await kanban.allTasks(), { view: 'summary' });
+            } else {
+              result = kanban.shapeEpic(toggled, await kanban.allTasks(), { view: 'full' });
+            }
+            break;
+          }
+
+          case 'epic_delete': {
+            const epicId = args.epic_id || args.epic;
+            if (!epicId) {
+              throw invalidRequest(
+                "epic_id is required for 'epic_delete'",
+                'Provide an epic id like E001',
+                { action }
+              );
+            }
+            result = await kanban.deleteEpic(epicId);
+            break;
+          }
+
+          case 'delete': {
+            if (!args.task_id) {
+              throw invalidRequest(
+                "task_id is required for 'delete'",
+                'Provide a task ID',
+                { action }
+              );
+            }
+            const deleted = await kanban.deleteTask(args.task_id);
+            result = returnShape === 'none'
+              ? { ok: true, task_id: deleted.task_id }
+              : deleted;
             break;
           }
 
@@ -723,7 +827,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           default:
             throw invalidRequest(
               `Unknown action: ${action}`,
-              'Use create, move, update, epic_create, epic_update, plan_create, plan_advance, plan_evidence, plan_done, or plan_status',
+              'Use create, move, update, delete, epic_create, epic_update, epic_archive, epic_unarchive, epic_delete, plan_create, plan_advance, plan_evidence, plan_done, or plan_status',
               { action }
             );
         }

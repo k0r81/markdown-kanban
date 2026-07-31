@@ -8,11 +8,13 @@ Source of truth: `agent-playbook.js` (also MCP tool descriptions + `kanban_read`
 
 - hierarchy: epic (context) → task (work+plan) → subtasks (steps)
 - list: `col` filter, `view=summary`; keep `task_id`s; no full-board re-list after every write
-- list_epics / show_epic for initiatives; filter tasks with `epic=E001`
+- list_epics default = live only (hides done + archived); `include_archived` / `status` to widen
+- list tasks default hides tasks under done/archived epics; show/show_epic by id always works
 - show: `view=execution` while coding; `full` only if needed
 - epic_create with description/goals; create tasks with `epic=E001` (prefer id)
 - create once with `description`, `specs`, `in_scope`, `out_of_scope`, `acceptance_criteria`
-- move/update: `return=none`; subtasks = full array replace (no toggle)
+- move/update/delete: `return=none`; subtasks = full array replace (no toggle)
+- cleanup: `delete` (task), `epic_delete` (cascade), `epic_archive` / `epic_unarchive`
 - non-trivial work: `plan_create` → `plan_advance` → `plan_evidence` (real tests, truncated logs) → `plan_done`
 - gui: `status` before `start`; `stop` only owned; `external_running` = do not kill
 

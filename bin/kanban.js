@@ -145,8 +145,9 @@ async function cliMcpInit(options) {
   }
 }
 
-async function cliList(colFilter, epicFilter, asJson) {
+async function cliList(colFilter, epicFilter, asJson, listOptions = {}) {
   await kanban.migrateEpicGroups();
+  const epics = await kanban.listEpicEntities();
   let tasks = await kanban.allTasks();
 
   if (colFilter) {
@@ -154,6 +155,8 @@ async function cliList(colFilter, epicFilter, asJson) {
   }
   if (epicFilter) {
     tasks = tasks.filter((task) => kanban.taskMatchesEpicFilter(task, epicFilter));
+  } else {
+    tasks = kanban.filterTasksForList(tasks, epics, listOptions);
   }
 
   if (asJson) {
@@ -207,11 +210,14 @@ async function cliShow(taskId) {
   }
 }
 
-async function cliEpicList(asJson) {
+async function cliEpicList(asJson, listOptions = {}) {
   await kanban.migrateEpicGroups();
   const tasks = await kanban.allTasks();
   const epics = await kanban.listEpicEntities();
-  const shaped = epics.map((epic) => kanban.shapeEpic(epic, tasks, { view: 'summary' }));
+  const shaped = kanban.filterShapedEpics(
+    epics.map((epic) => kanban.shapeEpic(epic, tasks, { view: 'summary' })),
+    listOptions
+  );
 
   if (asJson) {
     console.log(JSON.stringify(shaped, null, 2));
@@ -225,8 +231,9 @@ async function cliEpicList(asJson) {
 
   for (const epic of shaped) {
     const p = epic.progress || {};
+    const flag = epic.archived ? ' [archived]' : '';
     console.log(
-      `  ${epic.id.padEnd(6)}  ${epic.status.padEnd(8)}  ${String(epic.title).substring(0, 40).padEnd(40)}  ${p.tasks_done || 0}/${p.tasks_total || 0} tasks`
+      `  ${epic.id.padEnd(6)}  ${epic.status.padEnd(8)}  ${String(epic.title).substring(0, 40).padEnd(40)}  ${p.tasks_done || 0}/${p.tasks_total || 0} tasks${flag}`
     );
   }
 }
@@ -265,6 +272,38 @@ async function cliEpicUpdate(epicId, patch) {
   }
 }
 
+async function cliEpicArchive(epicId, archived) {
+  try {
+    const epic = archived
+      ? await kanban.archiveEpic(epicId)
+      : await kanban.unarchiveEpic(epicId);
+    console.log(`✓ Epic ${epic.id} ${archived ? 'archived' : 'unarchived'}`);
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function cliEpicDelete(epicId) {
+  try {
+    const result = await kanban.deleteEpic(epicId);
+    console.log(`✓ Deleted epic ${result.epic_id} (+${result.deleted_task_count} tasks)`);
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+}
+
+async function cliDelete(taskId) {
+  try {
+    const result = await kanban.deleteTask(taskId);
+    console.log(`✓ Deleted task ${shortId(result.task_id)}: ${result.title}`);
+  } catch (error) {
+    console.error(`✗ ${error.message}`);
+    process.exit(1);
+  }
+}
+
 async function cliMove(taskId, column) {
   const success = await kanban.doMove(taskId, column);
   if (success) {
@@ -286,8 +325,21 @@ async function cliAdd(title, column, epicGroup) {
   }
 }
 
+function injectProjectIntoHtml(html, project) {
+  const safe = String(project)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return html
+    .replace(/<title>[^<]*<\/title>/, `<title>${safe} · Kanban</title>`)
+    .replace(/<h1>Donna Kanban<\/h1>/, `<h1>${safe}</h1>`);
+}
+
 async function serveWeb(port) {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
+  const htmlTemplate = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
+  const project = guiRegistry.projectLabel();
+  const html = injectProjectIntoHtml(htmlTemplate, project);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
@@ -302,7 +354,13 @@ async function serveWeb(port) {
 
       if (requestPath === '/api/board') {
         await kanban.migrateEpicGroups();
-        const tasks = await kanban.allTasks();
+        const includeArchived = url.searchParams.get('include_archived') === 'true';
+        const epics = await kanban.listEpicEntities();
+        // GUI: show done-epic tasks; only hide archived unless toggled
+        const tasks = kanban.filterTasksForList(await kanban.allTasks(), epics, {
+          live_only: false,
+          include_archived: includeArchived
+        });
         sendJson(res, 200, tasks);
         return;
       }
@@ -311,7 +369,16 @@ async function serveWeb(port) {
         await kanban.migrateEpicGroups();
         const tasks = await kanban.allTasks();
         const epics = await kanban.listEpicEntities();
-        sendJson(res, 200, epics.map((epic) => kanban.shapeEpic(epic, tasks, { view: 'full' })));
+        const shaped = epics.map((epic) => kanban.shapeEpic(epic, tasks, { view: 'full' }));
+        const includeArchived = url.searchParams.get('include_archived') === 'true';
+        const includeDone = url.searchParams.get('include_done') === 'true';
+        const status = url.searchParams.get('status') || undefined;
+        // GUI default: all non-archived (live + done). Agents use MCP live-only.
+        const liveOnly = url.searchParams.get('live_only') === 'true';
+        const filtered = kanban.filterShapedEpics(shaped, liveOnly
+          ? { include_archived: includeArchived, include_done: includeDone, status }
+          : { live_only: false, include_archived: includeArchived, status });
+        sendJson(res, 200, filtered);
         return;
       }
 
@@ -368,6 +435,33 @@ async function serveWeb(port) {
         );
         sendJson(res, 201, task);
         return;
+      }
+
+      if (req.method === 'DELETE') {
+        const epicDeleteMatch = requestPath.match(/^\/api\/epic-entities\/([^/]+)$/);
+        if (epicDeleteMatch) {
+          const result = await kanban.deleteEpic(epicDeleteMatch[1]);
+          sendJson(res, 200, result);
+          return;
+        }
+
+        const taskDeleteMatch = requestPath.match(/^\/api\/(?:epics|tasks)\/([^/]+)$/);
+        if (taskDeleteMatch) {
+          const result = await kanban.deleteTask(taskDeleteMatch[1]);
+          sendJson(res, 200, result);
+          return;
+        }
+      }
+
+      if (req.method === 'POST') {
+        const epicArchiveMatch = requestPath.match(/^\/api\/epic-entities\/([^/]+)\/(archive|unarchive)$/);
+        if (epicArchiveMatch) {
+          const epic = epicArchiveMatch[2] === 'archive'
+            ? await kanban.archiveEpic(epicArchiveMatch[1])
+            : await kanban.unarchiveEpic(epicArchiveMatch[1]);
+          sendJson(res, 200, kanban.shapeEpic(epic, await kanban.allTasks(), { view: 'full' }));
+          return;
+        }
       }
 
       if (req.method === 'PATCH') {
@@ -504,6 +598,7 @@ async function serveWeb(port) {
   });
 
   console.log(`\x1b[1;32m→ Kanban GUI: ${portInfo.url}\x1b[0m`);
+  console.log(`  Project:   ${portInfo.project || project}`);
   console.log(`  Backlog:   ${BACKLOG}`);
   console.log('  Ctrl+C żeby zamknąć');
 }
@@ -617,6 +712,7 @@ async function main() {
     let colFilter = null;
     let epicFilter = null;
     let asJson = false;
+    let includeArchived = false;
 
     for (let i = 1; i < args.length; i++) {
       if (args[i] === '--col' && args[i + 1]) {
@@ -625,14 +721,31 @@ async function main() {
         epicFilter = args[++i];
       } else if (args[i] === '--json') {
         asJson = true;
+      } else if (args[i] === '--include-archived') {
+        includeArchived = true;
       }
     }
 
-    await cliList(colFilter, epicFilter, asJson);
+    await cliList(colFilter, epicFilter, asJson, { include_archived: includeArchived });
   } else if (cmd === 'epic') {
     const sub = args[1];
     if (sub === 'list') {
-      await cliEpicList(args.includes('--json'));
+      let includeArchived = false;
+      let includeDone = false;
+      let status;
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === '--include-archived') includeArchived = true;
+        else if (args[i] === '--include-done') includeDone = true;
+        else if (args[i] === '--all') {
+          includeArchived = true;
+          includeDone = true;
+        } else if (args[i] === '--status' && args[i + 1]) status = args[++i];
+      }
+      await cliEpicList(args.includes('--json'), {
+        include_archived: includeArchived,
+        include_done: includeDone,
+        status
+      });
     } else if (sub === 'show' && args[2]) {
       await cliEpicShow(args[2]);
     } else if (sub === 'add' && args[2]) {
@@ -645,12 +758,20 @@ async function main() {
       await cliEpicAdd(args[2], { description, goals });
     } else if (sub === 'update' && args[2] && args[3]) {
       await cliEpicUpdate(args[2], parseJsonPayload(args[3]));
+    } else if (sub === 'archive' && args[2]) {
+      await cliEpicArchive(args[2], true);
+    } else if (sub === 'unarchive' && args[2]) {
+      await cliEpicArchive(args[2], false);
+    } else if ((sub === 'rm' || sub === 'delete') && args[2]) {
+      await cliEpicDelete(args[2]);
     } else {
-      console.error('Usage: kanban epic list|show|add|update ...');
+      console.error('Usage: kanban epic list|show|add|update|archive|unarchive|rm ...');
       process.exit(1);
     }
   } else if (cmd === 'show' && args[1]) {
     await cliShow(args[1]);
+  } else if ((cmd === 'rm' || cmd === 'delete') && args[1]) {
+    await cliDelete(args[1]);
   } else if (cmd === 'move' && args[1] && args[2]) {
     await cliMove(args[1], args[2]);
   } else if (cmd === 'add' && args[1]) {

@@ -35,9 +35,16 @@ kanban list --json
 kanban epic add "Phase 1" --description "Why this initiative" --goals "Ship X"
 kanban add "My task" --col planned --epic E001
 
-# List epics / show epic with child rollup
+# List epics / show epic with child rollup (default: live only)
 kanban epic list --json
+kanban epic list --all --json
 kanban epic show E001
+
+# Archive or delete (epic_delete cascades child tasks)
+kanban epic archive E001
+kanban epic unarchive E001
+kanban epic rm E001
+kanban rm 001
 
 # Show details
 kanban show 001
@@ -130,7 +137,7 @@ Auto-start the web GUI with MCP (opt-in):
 }
 ```
 
-Optional: pin the port with `KANBANGO_GUI_PORT` (e.g. `"5821"`). Without it, each project gets a stable port in `5510–5999` derived from the project path. The real URL is always available via `kanban_gui` → `status` (and written to `backlog/.kanbango-gui.json` while the GUI runs).
+Optional: pin the port with `KANBANGO_GUI_PORT` (e.g. `"5821"`). Without it, each project gets a stable port in `5510–5999` derived from the project path. The real URL is always available via `kanban_gui` → `status` (and written to `backlog/.kanbango-gui.json` while the GUI runs). The browser tab title, GUI header, and `kanban_gui` responses include `project` (folder name of the project cwd; override with `KANBANGO_PROJECT_NAME`).
 
 Or generate the config files automatically:
 

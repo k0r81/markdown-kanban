@@ -199,6 +199,7 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
 .sl-status.planned { background: #dbeafe; color: #1d4ed8; }
 .sl-status.active { background: #ffedd5; color: #c2410c; }
 .sl-status.done { background: #dcfce7; color: #15803d; }
+.sl-status.archived { background: #f1f5f9; color: #64748b; }
 .sl-progress {
   font-size: 11px;
   color: var(--muted);
@@ -720,6 +721,7 @@ header h1 { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
   <h1>Donna Kanban</h1>
   <span class="hstats" id="hstats">—</span>
   <span class="hspacer"></span>
+  <button class="btn-new" id="btn-show-archived" onclick="toggleShowArchived()" style="background:#94a3b8">Show archived</button>
   <button class="btn-new" id="btn-new-epic" onclick="toggleNewEpicForm()" style="background:#64748b">+ New epic</button>
   <button class="btn-new" id="btn-new" onclick="toggleNewForm()">+ New task</button>
 </header>
@@ -794,18 +796,52 @@ let editingId  = null;
 let dirtyEdits = {}; // taskId -> editable task draft
 let editingEpicId = null;
 let dirtyEpicEdits = {}; // epicId -> draft
+let showArchived = false;
 
 // ── Load & render ─────────────────────────────────────────────────────────────
 
 async function load() {
+  const q = showArchived ? "?include_archived=true" : "";
   const [boardRes, epicsRes] = await Promise.all([
-    fetch("/api/board"),
-    fetch("/api/epics")
+    fetch("/api/board" + q),
+    fetch("/api/epics" + q)
   ]);
   allTasks = await boardRes.json();
   allEpicEntities = epicsRes.ok ? await epicsRes.json() : [];
   refreshEpicDatalist();
   render();
+}
+
+async function archiveEpic(epicId, archived) {
+  const action = archived ? "archive" : "unarchive";
+  await fetch(`/api/epic-entities/${enc(epicId)}/${action}`, { method: "POST" });
+  if (editingEpicId === epicId) editingEpicId = null;
+  await load();
+}
+
+async function deleteEpicEntity(epicId, title) {
+  if (!confirm(`Delete epic ${epicId} "${title}" and ALL its tasks? This cannot be undone.`)) return;
+  await fetch(`/api/epic-entities/${enc(epicId)}`, { method: "DELETE" });
+  if (editingEpicId === epicId) editingEpicId = null;
+  await load();
+}
+
+async function deleteTaskCard(taskId, title) {
+  if (!confirm(`Delete task ${taskId}: ${title}?`)) return;
+  await fetch(`/api/tasks/${enc(taskId)}`, { method: "DELETE" });
+  expanded.delete(taskId);
+  editingId = null;
+  await load();
+}
+
+function toggleShowArchived() {
+  showArchived = !showArchived;
+  const btn = document.getElementById("btn-show-archived");
+  if (btn) {
+    btn.textContent = showArchived ? "Hide archived" : "Show archived";
+    btn.style.background = showArchived ? "#6366f1" : "#94a3b8";
+  }
+  load();
 }
 
 function refreshEpicDatalist() {
@@ -1128,6 +1164,27 @@ function renderSwimlane({ key, name, epicId, entity, tasks }) {
       render();
     };
     toggles.appendChild(editBtn);
+
+    const archBtn = document.createElement("button");
+    archBtn.type = "button";
+    archBtn.className = "sl-edit-btn";
+    archBtn.textContent = entity.archived ? "Unarchive" : "Archive";
+    archBtn.onclick = e => {
+      e.stopPropagation();
+      archiveEpic(epicId, !entity.archived);
+    };
+    toggles.appendChild(archBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "sl-edit-btn";
+    delBtn.textContent = "Delete";
+    delBtn.title = "Delete epic and all child tasks";
+    delBtn.onclick = e => {
+      e.stopPropagation();
+      deleteEpicEntity(epicId, entity.title || name);
+    };
+    toggles.appendChild(delBtn);
   }
 
   hdr.appendChild(toggles);
@@ -1256,6 +1313,16 @@ function renderCard(epic, colId) {
     editBtn.title = "Edit";
     editBtn.onclick = e => { e.stopPropagation(); startEdit(epic.id); };
     actions.appendChild(editBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "cbtn";
+    delBtn.textContent = "✕";
+    delBtn.title = "Delete task";
+    delBtn.onclick = e => {
+      e.stopPropagation();
+      deleteTaskCard(epic.id, displayTitle);
+    };
+    actions.appendChild(delBtn);
 
     card.appendChild(actions);
 

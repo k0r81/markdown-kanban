@@ -21,6 +21,15 @@ function guiPortFilePath() {
   return path.join(BACKLOG, GUI_PORT_FILE);
 }
 
+function projectLabel(cwd = process.cwd()) {
+  const fromEnv = process.env.KANBANGO_PROJECT_NAME;
+  if (fromEnv !== undefined && fromEnv !== null && String(fromEnv).trim()) {
+    return String(fromEnv).trim();
+  }
+  const base = path.basename(String(cwd || '').replace(/[/\\]+$/, ''));
+  return base || 'kanban';
+}
+
 function hashCwdToPort(cwd = process.cwd()) {
   let hash = 0;
   const input = String(cwd);
@@ -79,11 +88,13 @@ async function writeGuiPortFile({ port, pid = process.pid } = {}) {
   }
 
   await ensureBacklogDir();
+  const cwd = process.cwd();
   const data = {
     port: normalizedPort,
     pid,
     url: `http://localhost:${normalizedPort}`,
-    cwd: process.cwd(),
+    cwd,
+    project: projectLabel(cwd),
     started_at: new Date().toISOString()
   };
   await fs.writeFile(guiPortFilePath(), JSON.stringify(data, null, 2), 'utf-8');
@@ -129,11 +140,13 @@ async function discoverRunningGui() {
     pid: info.pid,
     url: info.url || `http://localhost:${info.port}`,
     cwd: info.cwd,
+    project: info.project || projectLabel(info.cwd),
     started_at: info.started_at
   };
 }
 
 module.exports = {
+  projectLabel,
   hashCwdToPort,
   normalizeGuiPort,
   resolvePreferredGuiPort,

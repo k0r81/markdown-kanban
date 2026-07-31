@@ -28,17 +28,25 @@ async function run() {
   assert.strictEqual(guiRegistry.resolvePreferredGuiPort(5900), 5900);
   delete process.env.KANBANGO_GUI_PORT;
 
+  const cwdNow = process.cwd();
+  const expectedProject = path.basename(cwdNow);
+  assert.strictEqual(guiRegistry.projectLabel(cwdNow), expectedProject);
+
   const written = await guiRegistry.writeGuiPortFile({ port: 5833, pid: process.pid });
   assert.strictEqual(written.port, 5833);
   assert.strictEqual(written.url, 'http://localhost:5833');
+  assert.strictEqual(written.project, expectedProject);
+  assert.strictEqual(written.cwd, cwdNow);
 
   const readBack = await guiRegistry.readGuiPortFile();
   assert.strictEqual(readBack.port, 5833);
+  assert.strictEqual(readBack.project, expectedProject);
 
   const discovered = await guiRegistry.discoverRunningGui();
   assert.ok(discovered);
   assert.strictEqual(discovered.port, 5833);
   assert.strictEqual(discovered.pid, process.pid);
+  assert.strictEqual(discovered.project, expectedProject);
 
   await guiRegistry.clearGuiPortFile({ pid: process.pid });
   assert.strictEqual(await guiRegistry.readGuiPortFile(), null);
@@ -66,18 +74,31 @@ async function run() {
   assert.ok(started.port >= 1 && started.port <= 65535);
   assert.ok(started.url.startsWith('http://localhost:'));
   assert.ok(started.pid);
+  assert.strictEqual(started.project, expectedProject);
+  assert.strictEqual(started.cwd, cwdNow);
 
   const status = await mcpServer.guiStatus();
   assert.strictEqual(status.status, 'running');
   assert.strictEqual(status.owned, true);
   assert.strictEqual(status.port, started.port);
   assert.strictEqual(status.url, started.url);
+  assert.strictEqual(status.project, expectedProject);
 
   await new Promise((resolve, reject) => {
     http.get(started.url, (res) => {
       assert.strictEqual(res.statusCode, 200);
-      res.resume();
-      res.on('end', resolve);
+      let body = '';
+      res.setEncoding('utf-8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          assert.ok(body.includes(`<title>${expectedProject} · Kanban</title>`), 'HTML title should include project');
+          assert.ok(body.includes(`<h1>${expectedProject}</h1>`), 'HTML h1 should include project');
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
     }).on('error', reject);
   });
 
@@ -85,6 +106,7 @@ async function run() {
   assert.strictEqual(again.status, 'already_running');
   assert.strictEqual(again.owned, true);
   assert.strictEqual(again.port, started.port);
+  assert.strictEqual(again.project, expectedProject);
 
   const stopped = await mcpServer.stopGuiServer();
   assert.strictEqual(stopped.status, 'stopping');

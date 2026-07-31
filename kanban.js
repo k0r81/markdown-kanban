@@ -63,12 +63,13 @@ const VIEW_FIELDS = {
 };
 
 const EPIC_VIEW_FIELDS = {
-  summary: ['id', 'title', 'created', 'status', 'progress'],
+  summary: ['id', 'title', 'created', 'status', 'archived', 'progress'],
   planning: [
     'id',
     'title',
     'created',
     'status',
+    'archived',
     'progress',
     'description',
     'goals',
@@ -80,6 +81,7 @@ const EPIC_VIEW_FIELDS = {
     'title',
     'created',
     'status',
+    'archived',
     'progress',
     'description',
     'goals',
@@ -89,6 +91,8 @@ const EPIC_VIEW_FIELDS = {
     'tasks'
   ]
 };
+
+const LIVE_EPIC_STATUSES = ['empty', 'planned', 'active'];
 
 // Hard-required on create: title only (keeps GUI/CLI quick-add usable).
 // Strongly recommended for agent/planned work — missing ones yield warnings, not errors.
@@ -292,7 +296,8 @@ function normalizeEpic(epic) {
     goals: normalizeString(epic && epic.goals),
     in_scope: normalizeStringArray(epic && epic.in_scope),
     out_of_scope: normalizeStringArray(epic && epic.out_of_scope),
-    notes: normalizeString(epic && epic.notes)
+    notes: normalizeString(epic && epic.notes),
+    archived: Boolean(epic && epic.archived)
   };
 }
 
@@ -306,15 +311,24 @@ function serializeEpic(epic) {
     goals: normalized.goals,
     in_scope: normalized.in_scope,
     out_of_scope: normalized.out_of_scope,
-    notes: normalized.notes
+    notes: normalized.notes,
+    archived: normalized.archived
   };
 }
 
-function deriveEpicStatus(tasks) {
+function deriveEpicStatus(tasks, epic) {
+  if (epic && epic.archived) return 'archived';
   if (!tasks || tasks.length === 0) return 'empty';
   if (tasks.some((task) => task.column === 'active')) return 'active';
   if (tasks.every((task) => task.column === 'done')) return 'done';
   return 'planned';
+}
+
+function isLiveEpic(epicOrShaped) {
+  if (!epicOrShaped) return false;
+  if (epicOrShaped.archived) return false;
+  if (epicOrShaped.status) return LIVE_EPIC_STATUSES.includes(epicOrShaped.status);
+  return true;
 }
 
 function getEpicProgress(tasks) {
@@ -349,7 +363,7 @@ function shapeEpic(epic, tasks = [], options = {}) {
   const childTasks = tasks.filter((task) => task.epic_id === normalized.id);
   const payload = {
     ...normalized,
-    status: deriveEpicStatus(childTasks),
+    status: deriveEpicStatus(childTasks, normalized),
     progress: getEpicProgress(childTasks),
     tasks: childTasks.map((task) => shapeTask(task, { view: 'summary' }))
   };
@@ -357,6 +371,69 @@ function shapeEpic(epic, tasks = [], options = {}) {
     ? options.fields
     : (EPIC_VIEW_FIELDS[options.view || 'full'] || EPIC_VIEW_FIELDS.full);
   return pickEpicFields(payload, fields);
+}
+
+function filterShapedEpics(shapedEpics, options = {}) {
+  const statusFilter = normalizeString(options.status).toLowerCase() || null;
+  if (statusFilter) {
+    return shapedEpics.filter((epic) => epic.status === statusFilter);
+  }
+
+  // live_only=false: human/GUI board — everything except archived unless include_archived
+  if (options.live_only === false) {
+    if (options.include_archived) return shapedEpics;
+    return shapedEpics.filter((epic) => !epic.archived);
+  }
+
+  // Default (agents): only empty|planned|active
+  const includeArchived = Boolean(options.include_archived);
+  const includeDone = Boolean(options.include_done);
+
+  return shapedEpics.filter((epic) => {
+    if (epic.archived) return includeArchived;
+    if (epic.status === 'done') return includeDone || includeArchived;
+    return isLiveEpic(epic);
+  });
+}
+
+function archivedEpicIdSet(epics) {
+  const set = new Set();
+  for (const epic of epics) {
+    if (epic.archived) set.add(epic.id);
+  }
+  return set;
+}
+
+function nonLiveEpicIdSet(epics, tasks, options = {}) {
+  const includeArchived = Boolean(options.include_archived);
+  const includeDone = Boolean(options.include_done);
+  if (includeArchived && includeDone) return new Set();
+
+  const hidden = new Set();
+  for (const epic of epics) {
+    const childTasks = tasks.filter((task) => task.epic_id === epic.id);
+    const status = deriveEpicStatus(childTasks, epic);
+    if (status === 'archived' && !includeArchived) hidden.add(epic.id);
+    else if (status === 'done' && !includeDone && !includeArchived) hidden.add(epic.id);
+  }
+  return hidden;
+}
+
+function filterTasksForList(tasks, epics, options = {}) {
+  // Explicit epic filter (show that epic's tasks) is applied by caller after this.
+  // Default agent list: hide tasks under done/archived epics.
+  if (options.include_archived && options.include_done) return tasks;
+  // GUI path: hide only archived-epic tasks (done epics still show done cards)
+  if (options.live_only === false) {
+    if (options.include_archived) return tasks;
+    const archivedIds = archivedEpicIdSet(epics);
+    if (archivedIds.size === 0) return tasks;
+    return tasks.filter((task) => !task.epic_id || !archivedIds.has(task.epic_id));
+  }
+
+  const hiddenIds = nonLiveEpicIdSet(epics, tasks, options);
+  if (hiddenIds.size === 0) return tasks;
+  return tasks.filter((task) => !task.epic_id || !hiddenIds.has(task.epic_id));
 }
 
 function getProgress(task) {
@@ -771,6 +848,7 @@ async function updateEpicEntity(epicId, patch) {
     next.out_of_scope = normalizeStringArray(patch.out_of_scope);
   }
   if (patch.notes !== undefined) next.notes = normalizeString(patch.notes);
+  if (patch.archived !== undefined) next.archived = Boolean(patch.archived);
 
   const saved = await writeEpic(next);
 
@@ -784,6 +862,72 @@ async function updateEpicEntity(epicId, patch) {
   }
 
   return saved;
+}
+
+async function archiveEpic(epicId) {
+  return updateEpicEntity(epicId, { archived: true });
+}
+
+async function unarchiveEpic(epicId) {
+  return updateEpicEntity(epicId, { archived: false });
+}
+
+async function deleteTask(taskId) {
+  const resolvedId = await resolveTaskId(taskId);
+  const filePath = await findFile(resolvedId);
+  if (!filePath) {
+    throw createKanbanError(
+      'TASK_NOT_FOUND',
+      `Task ${taskId} was not found`,
+      'Call kanban_read with operation=list to discover valid task ids',
+      { task_id: taskId },
+      false,
+      404
+    );
+  }
+
+  const column = path.basename(path.dirname(filePath));
+  const task = await parseEpic(filePath, column);
+  await fs.unlink(filePath).catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+
+  return {
+    ok: true,
+    task_id: task.id,
+    task_number: task.task_number,
+    title: task.title,
+    column: task.column
+  };
+}
+
+async function deleteEpic(epicId) {
+  const epic = await getEpicEntity(epicId);
+  const tasks = await allTasks();
+  const children = tasks.filter((task) => task.epic_id === epic.id);
+  const deletedTasks = [];
+
+  for (const child of children) {
+    const result = await deleteTask(child.id);
+    deletedTasks.push({
+      task_id: result.task_id,
+      title: result.title,
+      column: result.column
+    });
+  }
+
+  const filePath = epicFilePath(epic.id);
+  await fs.unlink(filePath).catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+
+  return {
+    ok: true,
+    epic_id: epic.id,
+    title: epic.title,
+    deleted_tasks: deletedTasks,
+    deleted_task_count: deletedTasks.length
+  };
 }
 
 async function migrateEpicGroups(options = {}) {
@@ -1280,10 +1424,17 @@ module.exports = {
   doCreate,
   doCreateEpic,
   updateEpicEntity,
+  archiveEpic,
+  unarchiveEpic,
+  deleteTask,
+  deleteEpic,
   getEpicEntity,
   listEpicEntities,
   resolveEpicRef,
   taskMatchesEpicFilter,
+  filterShapedEpics,
+  filterTasksForList,
+  isLiveEpic,
   createKanbanError,
   createFieldWarnings,
   createEpicFieldWarnings,
@@ -1297,6 +1448,7 @@ module.exports = {
   STATUS_MAP,
   VIEW_FIELDS,
   EPIC_VIEW_FIELDS,
+  LIVE_EPIC_STATUSES,
   RECOMMENDED_CREATE_FIELDS,
   RECOMMENDED_EPIC_CREATE_FIELDS,
   EPICS_DIR
