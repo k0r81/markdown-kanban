@@ -121,6 +121,43 @@ function createKanbanError(code, message, hint, details = {}, retryable = false,
   return error;
 }
 
+// Serialize board mutations so concurrent create/move/update cannot race on ids or paths.
+let mutationTail = Promise.resolve();
+
+function withBoardLock(fn) {
+  const run = mutationTail.then(() => fn());
+  mutationTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function isTaskOrEpicDataFile(file) {
+  if (!file || file.startsWith('.')) return false;
+  return file.endsWith('.json') || file.endsWith('.md');
+}
+
+async function writeFileAtomic(filePath, payload, { exclusive = false } = {}) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tempPath = path.join(
+    dir,
+    `.${base}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
+  );
+
+  await fs.writeFile(tempPath, payload, 'utf-8');
+  try {
+    if (exclusive) {
+      // Atomic create-if-absent: never exposes an empty final path to readers.
+      await fs.link(tempPath, filePath);
+      await fs.unlink(tempPath).catch(() => undefined);
+    } else {
+      await fs.rename(tempPath, filePath);
+    }
+  } catch (error) {
+    await fs.unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
+}
+
 function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
@@ -536,9 +573,24 @@ async function parseMarkdownTask(filePath, column) {
 }
 
 async function parseJsonTask(filePath, column) {
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, 'utf-8');
+  } catch (error) {
+    if (error.code === 'ENOENT') throw error;
+    throw createKanbanError(
+      'PARSE_ERROR',
+      `Task file ${path.basename(filePath)} could not be read`,
+      'Fix permissions or restore the file from version control',
+      { file: filePath, reason: error.message },
+      false,
+      500
+    );
+  }
+
   let data;
   try {
-    data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+    data = JSON.parse(raw);
   } catch (error) {
     throw createKanbanError(
       'PARSE_ERROR',
@@ -572,7 +624,7 @@ async function allEpics() {
     try {
       const files = await fs.readdir(colDir);
       const taskFiles = files
-        .filter((file) => file.endsWith('.json') || file.endsWith('.md'))
+        .filter((file) => isTaskOrEpicDataFile(file))
         .sort((left, right) => {
           const leftBase = path.basename(left, path.extname(left));
           const rightBase = path.basename(right, path.extname(right));
@@ -589,6 +641,8 @@ async function allEpics() {
         try {
           epics.push(await parseEpic(path.join(colDir, file), col));
         } catch (error) {
+          // File may vanish between readdir and read under concurrent delete.
+          if (error.code === 'ENOENT') continue;
           console.error(`  parse error ${file}: ${error.message}`);
         }
       }
@@ -614,6 +668,7 @@ async function nextEpicNumber() {
   try {
     const files = await fs.readdir(EPICS_DIR);
     for (const file of files) {
+      if (!isTaskOrEpicDataFile(file)) continue;
       const match = file.match(/^E0*(\d+)\.json$/i);
       if (match) ids.push(parseInt(match[1], 10));
     }
@@ -662,7 +717,7 @@ async function listEpicEntities() {
   const epics = [];
   try {
     const files = (await fs.readdir(EPICS_DIR))
-      .filter((file) => file.endsWith('.json'))
+      .filter((file) => isTaskOrEpicDataFile(file) && file.endsWith('.json'))
       .sort((left, right) => left.localeCompare(right));
     for (const file of files) {
       try {
@@ -677,7 +732,7 @@ async function listEpicEntities() {
   return epics;
 }
 
-async function writeEpic(epic) {
+async function writeEpic(epic, { exclusive = false } = {}) {
   const normalized = normalizeEpic(epic);
   if (!normalizeEpicId(normalized.id)) {
     throw createKanbanError(
@@ -691,7 +746,8 @@ async function writeEpic(epic) {
   }
   await ensureBacklogDir();
   const filePath = epicFilePath(normalized.id);
-  await fs.writeFile(filePath, JSON.stringify(serializeEpic(normalized), null, 2) + '\n', 'utf-8');
+  const payload = JSON.stringify(serializeEpic(normalized), null, 2) + '\n';
+  await writeFileAtomic(filePath, payload, { exclusive });
   return parseJsonEpic(filePath);
 }
 
@@ -760,7 +816,9 @@ async function resolveEpicRef(ref, options = {}) {
   }
 
   if (options.createIfMissing) {
-    const created = await doCreateEpic(normalizeString(ref), {});
+    const created = options.skipLock
+      ? await createEpicRecord(normalizeString(ref), {})
+      : await doCreateEpic(normalizeString(ref), {});
     return { epic_id: created.id, epic_group: created.title };
   }
 
@@ -774,7 +832,7 @@ async function resolveEpicRef(ref, options = {}) {
   );
 }
 
-async function doCreateEpic(title, extra = {}) {
+async function createEpicRecord(title, extra = {}) {
   if (!normalizeString(title)) {
     throw createKanbanError(
       'MISSING_REQUIRED_FIELD',
@@ -786,82 +844,102 @@ async function doCreateEpic(title, extra = {}) {
     );
   }
 
-  const nextId = await nextEpicNumber();
-  const epic = normalizeEpic({
-    id: `E${String(nextId).padStart(3, '0')}`,
-    title,
-    created: todayIso(),
-    description: extra.description,
-    goals: extra.goals,
-    in_scope: extra.in_scope,
-    out_of_scope: extra.out_of_scope,
-    notes: extra.notes
-  });
-  return writeEpic(epic);
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const nextId = await nextEpicNumber();
+    const epic = normalizeEpic({
+      id: `E${String(nextId).padStart(3, '0')}`,
+      title,
+      created: todayIso(),
+      description: extra.description,
+      goals: extra.goals,
+      in_scope: extra.in_scope,
+      out_of_scope: extra.out_of_scope,
+      notes: extra.notes
+    });
+    try {
+      return await writeEpic(epic, { exclusive: true });
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+  }
+  throw createKanbanError(
+    'CREATE_CONFLICT',
+    'Could not allocate a unique epic id',
+    'Retry the create operation',
+    { title },
+    true,
+    409
+  );
+}
+
+async function doCreateEpic(title, extra = {}) {
+  return withBoardLock(() => createEpicRecord(title, extra));
 }
 
 async function updateEpicEntity(epicId, patch) {
   validatePatch(patch);
-  const current = await getEpicEntity(epicId);
-  const next = { ...current };
+  return withBoardLock(async () => {
+    const current = await getEpicEntity(epicId);
+    const next = { ...current };
 
-  if (patch.title !== undefined) {
-    const title = normalizeString(patch.title);
-    if (!title) {
-      throw createKanbanError(
-        'VALIDATION_ERROR',
-        'title must be a non-empty string',
-        'Send a non-empty title or omit the field',
-        { field: 'title' },
-        false,
-        400
-      );
+    if (patch.title !== undefined) {
+      const title = normalizeString(patch.title);
+      if (!title) {
+        throw createKanbanError(
+          'VALIDATION_ERROR',
+          'title must be a non-empty string',
+          'Send a non-empty title or omit the field',
+          { field: 'title' },
+          false,
+          400
+        );
+      }
+      next.title = title;
     }
-    next.title = title;
-  }
-  if (patch.description !== undefined) next.description = normalizeString(patch.description);
-  if (patch.goals !== undefined) next.goals = normalizeString(patch.goals);
-  if (patch.in_scope !== undefined) {
-    if (!Array.isArray(patch.in_scope)) {
-      throw createKanbanError(
-        'VALIDATION_ERROR',
-        'in_scope must be an array of strings',
-        'Send in_scope as an array',
-        { field: 'in_scope' },
-        false,
-        400
-      );
+    if (patch.description !== undefined) next.description = normalizeString(patch.description);
+    if (patch.goals !== undefined) next.goals = normalizeString(patch.goals);
+    if (patch.in_scope !== undefined) {
+      if (!Array.isArray(patch.in_scope)) {
+        throw createKanbanError(
+          'VALIDATION_ERROR',
+          'in_scope must be an array of strings',
+          'Send in_scope as an array',
+          { field: 'in_scope' },
+          false,
+          400
+        );
+      }
+      next.in_scope = normalizeStringArray(patch.in_scope);
     }
-    next.in_scope = normalizeStringArray(patch.in_scope);
-  }
-  if (patch.out_of_scope !== undefined) {
-    if (!Array.isArray(patch.out_of_scope)) {
-      throw createKanbanError(
-        'VALIDATION_ERROR',
-        'out_of_scope must be an array of strings',
-        'Send out_of_scope as an array',
-        { field: 'out_of_scope' },
-        false,
-        400
-      );
+    if (patch.out_of_scope !== undefined) {
+      if (!Array.isArray(patch.out_of_scope)) {
+        throw createKanbanError(
+          'VALIDATION_ERROR',
+          'out_of_scope must be an array of strings',
+          'Send out_of_scope as an array',
+          { field: 'out_of_scope' },
+          false,
+          400
+        );
+      }
+      next.out_of_scope = normalizeStringArray(patch.out_of_scope);
     }
-    next.out_of_scope = normalizeStringArray(patch.out_of_scope);
-  }
-  if (patch.notes !== undefined) next.notes = normalizeString(patch.notes);
-  if (patch.archived !== undefined) next.archived = Boolean(patch.archived);
+    if (patch.notes !== undefined) next.notes = normalizeString(patch.notes);
+    if (patch.archived !== undefined) next.archived = Boolean(patch.archived);
 
-  const saved = await writeEpic(next);
+    const saved = await writeEpic(next);
 
-  if (patch.title !== undefined && saved.title !== current.title) {
-    const tasks = await allTasks();
-    for (const task of tasks) {
-      if (task.epic_id === saved.id && task.epic_group !== saved.title) {
-        await updateTask(task.id, { epic_group: saved.title, _skipEpicResolve: true });
+    if (patch.title !== undefined && saved.title !== current.title) {
+      const tasks = await allTasks();
+      for (const task of tasks) {
+        if (task.epic_id === saved.id && task.epic_group !== saved.title) {
+          await updateTaskRecord(task.id, { epic_group: saved.title, _skipEpicResolve: true });
+        }
       }
     }
-  }
 
-  return saved;
+    return saved;
+  });
 }
 
 async function archiveEpic(epicId) {
@@ -872,7 +950,7 @@ async function unarchiveEpic(epicId) {
   return updateEpicEntity(epicId, { archived: false });
 }
 
-async function deleteTask(taskId) {
+async function deleteTaskRecord(taskId) {
   const resolvedId = await resolveTaskId(taskId);
   const filePath = await findFile(resolvedId);
   if (!filePath) {
@@ -891,6 +969,7 @@ async function deleteTask(taskId) {
   await fs.unlink(filePath).catch((error) => {
     if (error.code !== 'ENOENT') throw error;
   });
+  await removeOtherTaskCopies(task.id, path.join(BACKLOG, '__none__', `${task.id}.json`));
 
   return {
     ok: true,
@@ -901,14 +980,19 @@ async function deleteTask(taskId) {
   };
 }
 
+async function deleteTask(taskId) {
+  return withBoardLock(() => deleteTaskRecord(taskId));
+}
+
 async function deleteEpic(epicId) {
+  return withBoardLock(async () => {
   const epic = await getEpicEntity(epicId);
   const tasks = await allTasks();
   const children = tasks.filter((task) => task.epic_id === epic.id);
   const deletedTasks = [];
 
   for (const child of children) {
-    const result = await deleteTask(child.id);
+    const result = await deleteTaskRecord(child.id);
     deletedTasks.push({
       task_id: result.task_id,
       title: result.title,
@@ -928,6 +1012,7 @@ async function deleteEpic(epicId) {
     deleted_tasks: deletedTasks,
     deleted_task_count: deletedTasks.length
   };
+  });
 }
 
 async function migrateEpicGroups(options = {}) {
@@ -998,7 +1083,7 @@ async function findFile(epicId) {
     try {
       const files = await fs.readdir(colDir);
       const candidates = files
-        .filter((file) => (file.endsWith('.json') || file.endsWith('.md'))
+        .filter((file) => isTaskOrEpicDataFile(file)
           && path.basename(file, path.extname(file)) === epicId)
         .sort((left, _right) => (left.endsWith('.json') ? -1 : 1));
       if (candidates[0]) {
@@ -1057,18 +1142,42 @@ async function resolveTaskId(input) {
   return String(input);
 }
 
-async function writeTask(task, previousFilePath = null) {
+async function removeOtherTaskCopies(taskId, keepPath) {
+  const keep = path.resolve(keepPath);
+  for (const col of COLS) {
+    const colDir = path.join(BACKLOG, col);
+    try {
+      const files = await fs.readdir(colDir);
+      for (const file of files) {
+        if (!isTaskOrEpicDataFile(file)) continue;
+        if (path.basename(file, path.extname(file)) !== taskId) continue;
+        const candidate = path.join(colDir, file);
+        if (path.resolve(candidate) === keep) continue;
+        await fs.unlink(candidate).catch((error) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+async function writeTask(task, previousFilePath = null, { exclusive = false } = {}) {
   const normalized = normalizeTask(task);
   await ensureBacklogDir();
 
   const nextFilePath = path.join(BACKLOG, normalized.column, `${normalized.id}.json`);
-  await fs.writeFile(nextFilePath, JSON.stringify(serializeTask(normalized), null, 2) + '\n', 'utf-8');
+  const payload = JSON.stringify(serializeTask(normalized), null, 2) + '\n';
+  await writeFileAtomic(nextFilePath, payload, { exclusive });
 
   if (previousFilePath && path.resolve(previousFilePath) !== path.resolve(nextFilePath)) {
     await fs.unlink(previousFilePath).catch((error) => {
       if (error.code !== 'ENOENT') throw error;
     });
   }
+
+  await removeOtherTaskCopies(normalized.id, nextFilePath);
 
   return parseJsonTask(nextFilePath, normalized.column);
 }
@@ -1089,7 +1198,7 @@ async function migrateAll(options = {}) {
     }
 
     const mdFiles = files
-      .filter((file) => file.endsWith('.md'))
+      .filter((file) => isTaskOrEpicDataFile(file) && file.endsWith('.md'))
       .map((file) => ({
         name: file,
         taskId: path.basename(file, '.md')
@@ -1129,6 +1238,7 @@ async function nextTaskNumber() {
     try {
       const files = await fs.readdir(colDir);
       for (const file of files) {
+        if (!isTaskOrEpicDataFile(file)) continue;
         const match = file.match(/^(?:[A-Z]+-)?(\d+)/);
         if (match) ids.push(parseInt(match[1], 10));
       }
@@ -1180,39 +1290,52 @@ async function doCreate(title, column = 'planned', epicRef = '—', extra = {}) 
 
   validateColumn(column, 'col');
 
-  let epicLink = { epic_id: null, epic_group: '—' };
-  if (!isBlankEpicRef(epicRef)) {
-    epicLink = await resolveEpicRef(epicRef, { createIfMissing: true });
-  } else if (extra.epic_id) {
-    epicLink = await resolveEpicRef(extra.epic_id, { createIfMissing: false });
-  }
+  return withBoardLock(async () => {
+    let epicLink = { epic_id: null, epic_group: '—' };
+    if (!isBlankEpicRef(epicRef)) {
+      epicLink = await resolveEpicRef(epicRef, { createIfMissing: true, skipLock: true });
+    } else if (extra.epic_id) {
+      epicLink = await resolveEpicRef(extra.epic_id, { createIfMissing: false, skipLock: true });
+    }
 
-  const nextId = await nextTaskNumber();
-  const task = normalizeTask({
-    id: String(nextId).padStart(3, '0'),
-    title,
-    column,
-    epic_id: epicLink.epic_id,
-    epic_group: epicLink.epic_group,
-    created: todayIso(),
-    description: extra.description,
-    specs: extra.specs,
-    in_scope: extra.in_scope,
-    out_of_scope: extra.out_of_scope,
-    acceptance_criteria: extra.acceptance_criteria,
-    test_cases: extra.test_cases,
-    subtasks: extra.subtasks,
-    notes: extra.notes,
-    plan: extra.plan,
-    evidence: extra.evidence
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const nextId = await nextTaskNumber();
+      const task = normalizeTask({
+        id: String(nextId).padStart(3, '0'),
+        title,
+        column,
+        epic_id: epicLink.epic_id,
+        epic_group: epicLink.epic_group,
+        created: todayIso(),
+        description: extra.description,
+        specs: extra.specs,
+        in_scope: extra.in_scope,
+        out_of_scope: extra.out_of_scope,
+        acceptance_criteria: extra.acceptance_criteria,
+        test_cases: extra.test_cases,
+        subtasks: extra.subtasks,
+        notes: extra.notes,
+        plan: extra.plan,
+        evidence: extra.evidence
+      });
+      try {
+        return await writeTask(task, null, { exclusive: true });
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+    }
+    throw createKanbanError(
+      'CREATE_CONFLICT',
+      'Could not allocate a unique task id',
+      'Retry the create operation',
+      { title },
+      true,
+      409
+    );
   });
-
-  return writeTask(task);
 }
 
-async function updateTask(taskId, patch) {
-  validatePatch(patch);
-
+async function updateTaskRecord(taskId, patch) {
   const resolvedId = await resolveTaskId(taskId);
   const previousFilePath = await findFile(resolvedId);
   if (!previousFilePath) {
@@ -1256,7 +1379,12 @@ async function updateTask(taskId, patch) {
         next.epic_id = null;
         next.epic_group = '—';
       } else {
-        const link = await resolveEpicRef(ref, { createIfMissing: Boolean(patch.epic_group !== undefined && patch.epic_id === undefined && patch.epic === undefined) });
+        const link = await resolveEpicRef(ref, {
+          createIfMissing: Boolean(
+            patch.epic_group !== undefined && patch.epic_id === undefined && patch.epic === undefined
+          ),
+          skipLock: true
+        });
         next.epic_id = link.epic_id;
         next.epic_group = link.epic_group;
       }
@@ -1349,6 +1477,11 @@ async function updateTask(taskId, patch) {
   }
 
   return writeTask(next, previousFilePath);
+}
+
+async function updateTask(taskId, patch) {
+  validatePatch(patch);
+  return withBoardLock(() => updateTaskRecord(taskId, patch));
 }
 
 async function doMove(epicId, target) {

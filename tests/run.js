@@ -22,3 +22,4 @@ runNode(path.join('tests', 'plan-workflow.test.js'), [], 'Plan workflow test');
 runNode(path.join('tests', 'agent-playbook.test.js'), [], 'Agent playbook test');
 runNode(path.join('tests', 'epics.test.js'), [], 'Epics test');
 runNode(path.join('tests', 'delete-archive.test.js'), [], 'Delete/archive test');
+runNode(path.join('tests', 'race-conditions.test.js'), [], 'Race conditions test');
